@@ -1,0 +1,104 @@
+# generic
+*~
+*.bak
+*.swp
+*.orig
+*.lock
+*.out
+/#*
+core*
+*.core*
+*.dSYM/
+# KDE
+.directory
+# vim
+[._]*.s[a-w][a-z]
+[._]s[a-w][a-z]
+*un~
+Session.vim
+.netrwhist
+
+# libraries
+*.a
+*.lib
+*.la
+*.lo
+
+# objects
+*.o
+*.ko
+*.obj
+*.elf
+# shared objects
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# executables
+*.out
+*.exe
+*.app
+*.i*86
+*.x86_64
+*.hex
+*.com
+
+# mac osx
+.DS_Store
+.AppleDouble
+.LSOverride
+# icon must end with two newlines
+Icon
+
+# thumbnails
+._*
+
+# windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.cab
+*.msi
+*.msm
+*.msp
+
+# python
+*.py[cod]
+__pycache__/
+
+# python distribution and packaging
+.Python
+env/
+build/
+dist/
+lib/
+lib64/
+parts/
+sdist/
+var/
+.installed.cfg
+target/
+eggs/
+develop-eggs/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+MANIFEST
+
+# python unit testing
+htmlcov/
+cover/
+.coverage
+coverage.xml
+.cache
+.tox/
+nosetests.xml
+
+# sphinx
+_build
+_static
+_templates

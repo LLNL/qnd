@@ -1,0 +1,476 @@
+"""Pure python QnD wrapper for PDB files.
+
+PDB metadata description at https://wci.llnl.gov/codes/pact/pdb.html#pdb_fmt .
+
+Note that yorick-generated PDB files are version II, not version III.  Also,
+yorick pointers are written (by default) in a yorick-specific format.  Since
+yorick readability has held back many application codes (the LEOS library
+and LLNL rad-hydro codes used for ICF design), most of the dwindling legacy
+PDB files are version II.  Hence, this implementation focuses on the
+version III format, and the version I format is supported only for reading.
+
+Furthermore, this implementation only supports IEEE 754 4 and 8 byte
+floating point formats, since those are the only unambiguous floating
+point formats supported by numpy.  Fortunately, this covers all modern
+PDB files likely to show up in practice, so we have no significant
+incentive to do the work required to support exotic formats.
+
+"""
+from __future__ import absolute_import
+
+import sys
+import weakref
+from numbers import Integral
+from collections import OrderedDict
+from warnings import warn
+
+from numpy import (zeros, arange, fromfile, prod, cumprod, ascontiguousarray,
+                   array, dtype as npdtype)
+
+from .qnd import QGroup, QnDList
+from .generic import opener
+from .pdbparse import parser, PDBChart
+from .pdbdump import flusher_for, initializer_for
+
+__all__ = ['openpdb']
+
+PY2 = sys.version_info < (3,)
+if PY2:
+    range = xrange
+
+
+def openpdb(filename, mode='r', auto=1, **kwargs):
+    """Open PDB file or family, and wrap it in a QnD QGroup.
+
+    Parameters
+    ----------
+    filename : str
+       Name of file to open.  See notes below for file family.
+    mode : str
+       One of 'r' (default, read-only), 'r+' (read-write, must exist),
+       'a' (read-write, create if does not exist), 'w' (create, clobber if
+       exists), 'w-' (create, fail if exists).
+    auto : int
+       The intial state of auto-read mode.  If the QGroup handle returned
+       by openh5 is `f`, then ``f.varname`` reads an array variable, but not
+       a subgroup when auto=1, the default.  With auto=0, the variable
+       reference reads neither (permitting later partial reads in the case
+       of array variables).  With auto=2, a variable reference recursively
+       reads subgroups, bringing a whole tree into memory.
+    **kwargs
+       Other keywords.  The maxsize keyword sets the size of files in a
+       family generated in recording==1 mode; a new file will begin when
+       the first item in a new record would begin beyond `maxsize`.  The
+       default maxsize is 128 MiB (134 MB).
+
+    Returns
+    -------
+    f : QGroup
+       A file handle implementing the QnD interface.
+
+    Notes
+    -----
+    The `filename` may be an iterable, one string per file in order.  The
+    sequence may extend beyond the files which actually exist for 'r+', 'a',
+    'w', or 'w-' modes.
+
+    Alternatively `filename` specifies a family if it contains shell globbing
+    wildcard characters.  Existing matching files are sorted first by length,
+    then alphabetically (ensuring that 'file100' comes after 'file99', for
+    example).  If there is only a single wildcard group, it also serves to
+    define a sequence of future family names beyond those currently existing
+    for 'r+', 'a', 'w', or 'w-' modes.  A '?' pattern is treated the same as
+    a '[0-9]' pattern if all its matches are digits or if the pattern
+    matches no existing files.  Similarly, a '*' acts like the minimum number
+    of all-digit matches, or three digits if there are no matches.
+
+    """
+    maxsize = kwargs.pop('maxsize', 134217728)
+    handle, n = opener(filename, mode, **kwargs)
+    root = PDBGroup(handle, maxsize)
+    for i in range(n):
+        try:
+            parser(handle, root, i)
+        except IOError:
+            # Something went terribly wrong.  If this is first file, we die.
+            name = handle.filename(i)
+            if not i:
+                raise IOError("Fatal errors opening PDB file "
+                              "".format(name))
+            handle.open(i-1)
+            warn("file family stopped by incompatible {}".format(name))
+    handle.callbacks(flusher_for(root), initializer_for(root))
+    return QGroup(root, auto=auto)
+
+
+class PDBGroup(object):
+    """A directory in a PDB file, or a whole file or file family.
+
+    """
+    def __init__(self, parent, maxsize=134217728):
+        if not isinstance(parent, PDBGroup):  # this is root group
+            self.root = weakref.ref(self)
+            self.maxsize = maxsize
+            self.maxblocks = 0
+            self.handle = parent
+            self.chart = PDBChart(self)
+        else:
+            self.root = parent.root
+        self.items = OrderedDict()
+        self.attrs = None
+
+    @staticmethod
+    def isgroup():
+        return 1
+
+    @staticmethod
+    def islist():
+        return 0
+
+    isleaf = islist
+
+    def close(self):
+        self.root().handle.close()
+
+    def flush(self):
+        self.root().handle.flush()
+
+    def __len__(self):
+        return len(self.items)
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def lookup(self, name):
+        return self.items.get(name)
+
+    def declare(self, name, dtype, shape, unlim=None, addr=-1):
+        current = self.items.get(name)
+        if dtype == dict:
+            if current is not None:
+                if current.isgroup():
+                    return current
+                raise KeyError("already a non-group item {}".format(name))
+            item = PDBGroup(self)
+        elif dtype == list:
+            if current is not None:
+                if current.islist() == 2:
+                    return current
+                raise KeyError("already a non-list item {}".format(name))
+            item = QnDList(PDBGroup(self), 1)
+        else:
+            if current is not None:
+                raise KeyError("attempt to redeclare {}".format(name))
+            if dtype is None and name == '_':
+                # Assume we are creating a QList.
+                dtype = npdtype('u1')
+            item = PDBLeaf(self, addr, dtype, shape, unlim)
+            if unlim:
+                item = QnDList(item, None if hasattr(addr, '__iter__') or
+                               addr != -1 else 1)
+        self.items[name] = item
+        return item
+
+    # This is used in pdbparse._endparse to declare or check symbols
+    # against declarations from previous files in a family.
+    def _leaf_declare(self, name, dtype, shape, addr):
+        item = self.items.get(name)
+        unlim = isinstance(addr, list)
+        if item is not None:
+            tsa = None
+            if not isinstance(item, PDBLeaf):
+                item = None if isinstance(item, PDBGroup) else item.parent()
+            if item is not None:
+                tsa = item.tsa
+                if (unlim != isinstance(tsa[2], list) or
+                        tsa[:2] != (dtype, shape)):
+                    item = None
+                elif unlim:
+                    tsa[2].extend(addr)
+            if item is None:
+                raise IOError("incompatible redeclaration of {}".format(name))
+            return
+        self.declare(name, dtype, shape, unlim, addr)
+
+    def attget(self, vname):
+        item = self.lookup(vname) if vname else self
+        if isinstance(item, QnDList):
+            item = item.parent()
+        attrs = item.attrs
+        if attrs is None:
+            item.attrs = attrs = PDBAttrs(item)
+        return attrs
+
+    def attset(self, vname, aname, dtype, shape, value):
+        item = self.lookup(vname) if vname else self
+        if isinstance(item, QnDList):
+            item = item.parent()
+        attrs = item.attrs
+        if attrs is None:
+            item.attrs = attrs = PDBAttrs(item)
+        if value.dtype != dtype or value.shape != shape:
+            v = zeros(shape, dtype)
+            v[()] = value
+            value = v
+        attrs[aname] = value
+
+
+class PDBLeaf(object):
+    """An ndarray in a PDB file.
+
+    (Eventual stretch goal is to implement None and zero-length arrays.)
+
+    """
+    def __init__(self, parent, addr, dtype, shape, unlim):
+        if dtype is None or (shape and not all(shape)):
+            raise NotImplementedError("None or zero length array")
+        root = parent.root()
+        if not isinstance(dtype, tuple):
+            # Construct full data type: (dtype, stype, align, typename)
+            dtype = (dtype,) + root.chart.find_or_create(dtype)
+        self.parent = weakref.ref(parent)
+        self.attrs = None
+        if hasattr(addr, '__iter__'):
+            unlim = 1
+            if not isinstance(addr, list):
+                addr = list(addr)
+        elif addr == -1:
+            stype, align = dtype[1:3]
+            handle = root.handle
+            addr = _align(handle.next_address(), align)
+            handle.declared(addr, stype, prod(shape) if shape else 1)
+            if unlim:
+                addr = [addr]
+        elif unlim:
+            addr = [int(addr)]
+        else:
+            addr = int(addr)
+        self.tsa = dtype, shape, addr
+
+    @staticmethod
+    def isleaf():
+        return 1
+
+    @staticmethod
+    def isgroup():
+        return 0
+
+    islist = isgroup
+
+    def root(self):
+        return self.parent().root()
+
+    def query(self):
+        # return dtype, shape, sshape
+        dtype, shape, addr = self.tsa
+        if isinstance(addr, list):
+            # Do this for consistency with treatment of h5py chunked data.
+            shape = (len(addr),) + shape
+        return dtype[0], shape, shape
+
+    def read(self, args=()):
+        dtype, shape, addr = self.tsa
+        dtype, stype, _, typename = dtype
+        if isinstance(addr, list):
+            arg0 = args[0] if args else slice(None)
+            args = args[1:]
+            if not isinstance(arg0, Integral):
+                arg0 = arange(len(addr))[arg0]
+                if arg0.ndim == 1:
+                    return array([self.read((a,) + args) for a in arg0], dtype)
+                elif arg0.ndim:
+                    raise TypeError("block variable leading index too complex")
+            addr = addr[arg0]
+        root = self.root()
+        chart = root.chart
+        nopartial = chart.nopartial(typename)
+        if nopartial is None:
+            typename = None
+        if typename and nopartial:
+            offset = 0
+        else:
+            args, shape, offset = _leading_args(args, shape)
+        if offset:
+            addr += dtype.itemsize * offset
+        f = root.handle.seek(addr)
+        value = fromfile(f, stype, prod(shape) if shape else 1)
+        if not nopartial:
+            value = value.reshape(shape)[args]
+        if typename:
+            value = chart.read_special(f, typename, value)
+            stype = dtype = value.dtype
+        if nopartial:
+            value = value.reshape(shape)[args]
+        return value if stype is dtype else value.astype(dtype)
+
+    def write(self, value, args=()):
+        dtype, shape, addr = self.tsa
+        dtype, stype, align, typename = dtype[:4]
+        arg0 = args[0] if args else slice(None)
+        args = args[1:]
+        root = self.root()
+        handle = root.handle
+        if root.chart.nopartial(typename) is not None:
+            raise TypeError("write to pointer type {} unsupported"
+                            "".format(typename))
+        if isinstance(addr, list):
+            # This variable has blocks.
+            if not isinstance(arg0, Integral):
+                arg0 = arange(len(addr))[arg0]
+                if arg0.size > 1:
+                    raise TypeError("can only write block variables one "
+                                    "block at a time")
+                arg0 = arg0.reshape(())
+            newfile = arg0 == len(addr)
+            if newfile:
+                # This is a new block for this variable, but not first block.
+                # TODO: Should prevent partial writes here?
+                selfaddr = addr
+                addr, faddr = handle.next_address(both=1)
+                if faddr >= root.maxsize and arg0 >= root.maxblocks:
+                    a = handle.next_address(newfile=1)
+                    if a is not None:
+                        addr = a  # Next file in family has been created.
+                    else:
+                        # No next filename, and current file exceeds maxsize.
+                        pass  # TODO: issue warning here?
+                addr = _align(addr, align)
+                selfaddr.append(addr)
+                handle.declared(addr, stype, prod(shape) if shape else 1)
+            else:
+                addr = addr[arg0]
+        else:
+            newfile = False
+        args, shape, offset = _leading_args(args, shape)
+        if offset:
+            addr += dtype.itemsize * offset
+        seeker = handle.seek
+        f = seeker(addr)
+        if args:
+            # Must do read-modify-write for potentially non-contiguous write.
+            v = fromfile(f, stype, prod(shape) if shape else 1).reshape(shape)
+            v[args] = value
+            value = v
+            f = seeker(addr)
+        else:
+            value = ascontiguousarray(value, stype)
+            if value.shape != shape:
+                # Avoid the recent (numpy 1.10) broadcast_to function.
+                v = zeros(shape, dtype)
+                v[()] = value
+                value = v
+        value.tofile(f)
+
+
+def _leading_args(args, shape):
+    if not args:
+        return args, shape, 0
+    stride = cumprod((1,) + shape[::-1])[-2::-1]
+    offset = 0
+    args, shape = list(args), list(shape)
+    # First trim any fixed integer values off the leading args.
+    # This requires shifting the address by the corresponding offset,
+    # and reducing the effective shape of the stored data.  If the
+    # leading remaining dimension is a slice, we shrink the shape around
+    # the slice, and modify the slice correspondingly.
+    for i, a in enumerate(args):
+        n = shape[i]  # failure here means more simple args than dimensions
+        if isinstance(a, Integral):
+            if a < 0:
+                a += n
+            if a < 0 or a >= n:
+                raise IndexError("scalar index out of range")
+            offset += a * stride[i]
+            continue
+        if isinstance(a, slice):
+            j0, j1, di = _slice_endpoints(a, n)
+            # now x[i0:i1:di] == x[j0:j1][::di]
+            if j1 == j0:
+                j0 = j1 = 0
+            if j0:
+                offset += j0 * stride[i]
+            shape[i] = j1 - j0
+            args[i] = slice(None, None, di) if di != 1 else slice(None)
+        if i:
+            args, shape = args[i-1:], shape[i-1:]
+        break
+    else:
+        # All args were scalar int.
+        args, shape = [], shape[len(args):]
+    # Next, trim any full length trailing dimensions.  This is used to
+    # detect whether or not a write operation requires a read-modify-write
+    # cycle (presuming yes if the remaining args list is not empty).
+    # This program may be too difficult to carry out if any argument
+    # corresponds to multiple dimensions or is otherwise complex, so
+    # we need to work out the args <--> shape correspondence first.
+    nargs, ndim = len(args), len(shape)
+    iellipsis = None
+    for i, a in enumerate(args):
+        if a is Ellipsis:
+            iellipsis = i
+        elif not isinstance(a, slice):
+            break
+    else:
+        # We may be able to remove some trailing dimensions.
+        soffset = 0 if iellipsis is None else ndim - nargs
+        if soffset >= -1:
+            nremove = 0
+            for i, a in reversed(enumerate(args)):
+                if i == iellipsis:
+                    soffset = 0
+                    # Note that if ellipsis is present and not removed,
+                    # we cannot remove anything.
+                    iellipsis = None
+                else:
+                    n = shape[i+soffset]
+                    if _slice_endpoints(a, n) != (0, n, 1):
+                        break
+                nremove += 1
+            if nremove and iellipsis is None:
+                args = args[:-nremove]
+    return tuple(args), tuple(shape), offset
+
+
+def _slice_endpoints(s, n):
+    i0, i1, di = s.indices(n)
+    # Although i0 is the first point, i1 may not be one beyond the
+    # nominal final point.  Furthermore, if di < 0, i1 will be less
+    # than i0.  Unscramble all of this to find j0 < j1 so that:
+    #   x[i0:i1:di] == x[j0:j1][::di]
+    if di > 1:
+        i1 = ((i1 - i0 - 1)//di)*di + i0 + 1
+    elif di < 0:
+        i1, i0 = i0 + 1, ((i1 - i0 + 1)//di)*di + i0
+    return i0, i1, di
+
+
+def _align(addr, align):
+    if align > 1:
+        rem = addr & (align - 1)
+        if rem:
+            addr += align - rem
+    return addr
+
+
+class PDBAttrs(dict):
+    """Variable attributes are not a standard feature of PDB.
+
+    We implement a poor man's version here as follows: Attributes are
+    held in memory until the metadata is flushed, at which point they
+    are written with name 'variable_path:attribute_name' immediately
+    before the metadata.  If the file is extended, new data overwrites
+    old attributes, which are rewritten just before the metadata once
+    again.
+
+    Hence, in memory, a dict suffices.
+
+    """
+    __slots__ = ()
+    # qnd.QAttribute uses only __iter__, get, items, __len__, __contains__
+    # PDBGroup uses __setitem__
+    # Only thing that needs fixing is mapping items to iteritems for python2.
+    if PY2:
+        def items(self):
+            return self.iteritems()
+    else:
+        pass
