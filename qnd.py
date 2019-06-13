@@ -675,27 +675,27 @@ class QGroup(ItemsAreAttrs):
                 if recording != 1 or dtype in (list, dict, object, None):
                     # Declare an anonymous-group-style list.
                     item = this.declare(name, list)
-                else:
-                    # Declare item with UNLIMITED dimension.
+                else:  # Declare item with UNLIMITED dimension.
                     item = this.declare(name, dtype, shape, 1)
-                    if value is None:
-                        return
                 # item now an empty list
-            if dtype == dict:
+            elif dtype == dict:
                 item = this.declare(name, dict)
                 if value:
                     QGroup(item).update(value)
                 return
-            if dtype == list:
+            elif dtype == list:
                 item = this.declare(name, list)
                 if value:
                     QList(item).extend(value)
                 return
-            if dtype == object:
+            elif dtype == object:
                 item = this.declare(name, dict, None)
                 _dump_object(item, value)
                 return
-            item = this.declare(name, dtype, shape)
+            else:
+                item = this.declare(name, dtype, shape)
+            if value is None:
+                return
         while item.islist():
             if recording:
                 if args:
@@ -1344,14 +1344,14 @@ class QnDList(object):
     __slots__ = '_qnd_parent', '_qnd_current',
 
     def __init__(self, parent, empty=None):
-        object.__setattr__(self, '_qnd_parent', parent)
+        self._qnd_parent = parent
         current = empty
         if empty is not None:
             if parent.isgroup():
                 parent.declare('_', None, ())
             elif not isinstance(parent, QnDList):
                 current = -1
-        object.__setattr__(self, '_qnd_current', current)
+        self._qnd_current = current
 
     def fromgroup(self, parent):
         item = parent.lookup('_')

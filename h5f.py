@@ -185,7 +185,7 @@ class _WrapAttributeManager(object):
 
 
 class H5Leaf(object):
-    __slots__ = 'h5item', 'parent',
+    __slots__ = 'h5item', 'parent'
 
     def __init__(self, h5item, parent):
         self.h5item = h5item

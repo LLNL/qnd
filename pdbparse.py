@@ -342,10 +342,7 @@ class PDBChart(object):
         else:
             stype = npdtype(dict(names=names, formats=formats,
                                  offsets=offsets, itemsize=size))
-        if stype.isnative:
-            dtype = stype
-        else:
-            dtype = stype.newbyteorder('=')
+        dtype = stype if stype.isnative else stype.newbyteorder('=')
         current = structs.get(name)
         if current:
             if current == (stype, dtype, align, members):

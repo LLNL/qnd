@@ -48,12 +48,14 @@ def opener(filename, mode, **kwargs):
     handle
        A file handle implementing the generic interface, consisting of::
 
-          handle.callback(flusher)  # call flusher(handle) to flush
+          handle.callbacks(flusher, initializer)
           addr = handle.next_address()  # next unused address
           f = handle.seek(addr)  # return ordinary file handle at addr
-          handle.flush()  # make file readable, calling flusher(handle)
+          f = handle.open(n)  # open nth file, calling initializer(f)
+          handle.flush()  # make file readable, calling flusher(f)
           # flush() restores next_address to value on entry
           handle.close()  # flush if necessary, then close
+
     nexisting : int
        Number of existing paths matching `filename`.
 
@@ -244,13 +246,14 @@ class MultiFile(object):
             n = current
         return pattern.format(existing[n])
 
-    def zero_address(self, n=None):
-        """multifile address of first byte in current or n-th file"""
-        return self.state[3] << self.abits
+    def filemode(self):
+        return self.state[0]
 
     def open(self, n):
         """open n-th file of family"""
         mode, pattern, existing, current, future = self.state
+        if n == current:
+            return self.f
         writeable = mode.startswith('w') or '+' in mode
         isnew = n == len(existing)
         if n < len(existing):
@@ -270,15 +273,24 @@ class MultiFile(object):
                               "".format(pattern.format(existing[-1])))
             if not mode.startswith('w'):
                 mode = 'w+b'
-        f = open(pattern.format(member), mode)
         if isnew:
-            existing.append(member)
+            self.flush()
+        f = open(pattern.format(member), mode)
+        self.f.close()
         self.state[3] = n
         self.f = f
-        self.nextaddr = n << self.abits
-        initializer = self._callbacks[1]
-        if initializer is not None:
-            initializer(f)
+        # Starting nextaddr at 0 is correct only when isnew.
+        # In other cases we leave it set to its most recent known value
+        # in a different file.  This assures nextaddr is in last file.
+        if isnew:
+            existing.append(member)
+            self.nextaddr = n << self.abits
+            initializer = self._callbacks[1]
+            if initializer is not None:
+                # Note that initializer may call open recursively, but if
+                # so caller must take care to ensure that such a recursive
+                # call does not reach this point.
+                initializer(f)
         return f
 
     def flush(self):
@@ -297,6 +309,14 @@ class MultiFile(object):
         """flush and close the current file"""
         self.flush()
         self.f.close()
+
+    def current_file(self):
+        """Index of current file in family, argument to open method."""
+        return self.state[3]
+
+    def zero_address(self, n=None):
+        """multifile address of first byte in current or n-th file"""
+        return (self.state[3] if n is None else n) << self.abits
 
     # This is not used by pdbf module, but provide it anyway.
     def tell(self):
