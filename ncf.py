@@ -109,7 +109,7 @@ def opennc(filename, mode='r', auto=1, **kwargs):
             # Something went terribly wrong.  If this is first file, we die.
             name = handle.filename(i)
             if not i:
-                raise IOError("Fatal errors opening PDB file {}"
+                raise IOError("Fatal errors opening netCDF file {}"
                               "".format(name))
             handle.open(i-1)
             warn("file family stopped by incompatible {}".format(name))
@@ -177,7 +177,7 @@ def ncparse(handle, root, ifile):
         return
     f = handle.open(ifile)
     magic = fromfile(f, 'S4', 1)[0]
-    version = magic[3]
+    version = magic[3:]  # in python3, magic[3] is int(1) != b'\x01'
     if magic[:3] != b'CDF' or version not in b'\x01\x02':
         raise IOError("bad magic in netCDF-3 header")
     v64 = version != b'\x01'
