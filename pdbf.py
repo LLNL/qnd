@@ -27,7 +27,7 @@ from warnings import warn
 from numpy import (zeros, arange, fromfile, prod, array, ascontiguousarray,
                    dtype as npdtype)
 
-from .qnd import QGroup, QnDList
+from .frontend import QGroup, QnDList
 from .generic import opener
 from .pdbparse import parser, PDBChart
 from .pdbdump import flusher_for, initializer_for

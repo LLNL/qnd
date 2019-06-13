@@ -10,7 +10,7 @@ from numpy import (dtype, prod, fromfile, asarray, array, zeros, concatenate,
                    ascontiguousarray)
 from numpy.core.defchararray import decode as npdecode, encode as npencode
 
-from .qnd import QGroup
+from .frontend import QGroup
 from .generic import opener
 from .utils import leading_args
 

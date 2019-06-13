@@ -25,7 +25,7 @@ from h5py import File, Group, Dataset, Datatype
 
 from numpy import zeros
 
-from .qnd import QGroup, QnDList
+from .frontend import QGroup, QnDList
 
 __all__ = ['openh5']
 
