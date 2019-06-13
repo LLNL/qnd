@@ -1,18 +1,6 @@
 User Interface for Binary Files
 ===============================
 
-The qnd module (quick and dirty) provides a frontend for reading and
-writing self-describing binary files.  Backends exist for HDF5 and PDB
-file formats (the former via h5py, the latter via pure python code).
-Adding backends is not very difficult; the interface is well-defined
-and relatively small.
-
-This page describes the design philosophy behind this user interface;
-in a nutshell, the idea is to keep things as simple as possible, but
-no simpler (as Einstein said).  The problem we are setting out to
-solve is to store collections of scientific data, which means for the
-most part arrays of numbers.
-
 In terms of the scipy environment, qnd addresses the storage and
 retrieval of numpy ndarrays, excepting arrays with the general python
 object data type (dtype.kind 'O').  In scipy programs, these arrays
@@ -29,10 +17,12 @@ from whatever objects their program requires.  The dict and list are
 precisely the collections provided by the simple and popular JSON data
 interchange format.  Thus, in order to use the qnd storage interface,
 we are essentially asking the programmer support a portable
-organization of the program data.  Note the contrast to the goal of
-the python pickle module; we acknowledge that some extra design and
-maintenance work may be required to support such a mapping.  Often
-the additional effort pays off in a simplified overall design.
+organization of the program data.
+
+Note the contrast to the goal of the python pickle module; we
+acknowledge that some extra design and maintenance work may be
+required to support such a mapping.  Often the additional effort pays
+off in a simplified overall design.
 
 Basic Usage
 -----------
@@ -79,10 +69,10 @@ variable named 'close' in `f` (who knows where `f` came from), you
 could always access it as ``f['close']``.  However, qnd provides a
 quick and dirty option for using the dot operator even in these cases:
 it will remove a single trailing underscore, so that ``f.close_``
-refers to the variable 'close', not 'close_'.  (``f.close__`` would
-refer to 'close_'.)  This idiom is suggested by the PEP8 python style
-guide, and you would also need it to escape python keywords, like
-``f.yield_`` to refer to ``f['yield']``.
+refers to the variable ``'close'``, not ``'close_'``.  (``f.close__``
+would refer to ``'close_'``.)  This idiom is suggested by the PEP8
+python style guide, and you would also need it to escape python
+keywords, like ``f.yield_`` to refer to ``f['yield']``.
 
 The bottom line is, you use a qnd file handle `f` as if it were a
 python dict, but you are also free to treat items in `f` as if they
@@ -207,7 +197,7 @@ read them::
 
   f = openh5('myfile.h5', 'r')
   # Initially, goto mode is off (None), and reading a record variable...
-  times = f.times  # ...returns a list (not array) of all of its records.
+  times = f.time[:]  # ...returns a list (not array) of all of its records.
   # Use goto to set a "current record" index for all record variables:
   f.goto(0)  # first record
   t0 = f.time
@@ -276,7 +266,7 @@ twist: Instead of an ordinary dict, ``f()`` results in a dict subclass
 called an `ADict`, which permits access to the dict items as
 attributes according to the same rules as for a `QGroup`.  If you want
 to convert your own `dict` objects into `Adict` objects, you can use
-the `redict` function in the `qnd.adict` module.  That module also
+the `redict` function in the ``qnd.adict`` module.  That module also
 contains a generic mix-in class `ItemsAreAttrs` which you can use as a
 base class for your own mapping classes.  (Although be sure you read
 the comment in the `__getattr__` method before you attempt this, as it
