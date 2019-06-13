@@ -109,7 +109,7 @@ def opennc(filename, mode='r', auto=1, **kwargs):
             # Something went terribly wrong.  If this is first file, we die.
             name = handle.filename(i)
             if not i:
-                raise IOError("Fatal errors opening PDB file "
+                raise IOError("Fatal errors opening PDB file {}"
                               "".format(name))
             handle.open(i-1)
             warn("file family stopped by incompatible {}".format(name))
@@ -178,7 +178,7 @@ def ncparse(handle, root, ifile):
     f = handle.open(ifile)
     magic = fromfile(f, 'S4', 1)[0]
     version = magic[3]
-    if magic[:3] or version not in b'\x01\x02':
+    if magic[:3] != b'CDF' or version not in b'\x01\x02':
         raise IOError("bad magic in netCDF-3 header")
     v64 = version != b'\x01'
     iobe = dtype('>i8') if v64 else i4be
@@ -186,16 +186,14 @@ def ncparse(handle, root, ifile):
     tag, count = fromfile(f, i4be, 2)
     if tag != 10 and (count or tag):
         raise IOError("bad dim_list in netCDF-3 header")
-    dims, hasrecs = [], False
+    dims, recid = [], None
     while count > 0:
         count -= 1
         name = _get_name(f)
         size = int(fromfile(f, i4be, 1)[0])
-        dims.append((name, size))
         if not size:
-            hasrecs = True
-    if hasrecs:
-        recid = dims.index(0)
+            recid = len(dims)
+        dims.append((name, size))
     attrs = [(None, _get_attrs(f))]
     tag, count = fromfile(f, i4be, 2)
     if tag != 11 and (count or tag):
@@ -226,7 +224,7 @@ def ncparse(handle, root, ifile):
             sshape = tuple(dims[i][0] for i in shape)
         except IndexError:
             raise IOError("bad dimension index in netCDF-3 header")
-        shape = tuple(dims[i][0] for i in shape)
+        shape = tuple(dims[i][1] for i in shape)
         item = NCLeaf(root, len(variables), offset, stype, shape, sshape)
         variables[name] = NCList(root, item) if unlim else item
         if unlim:
@@ -276,6 +274,7 @@ def _bytes_as_str(text):
     if hasattr(text, 'ravel'):
         text = text.ravel()[0]
     if isinstance(text, bytes):
+        need_unicode = False
         if PY2:
             try:
                 text.decode('ascii')
@@ -362,10 +361,7 @@ class NCGroup(object):
         return iter(self.variables)
 
     def lookup(self, name):
-        item = self.variables.get(name)
-        if item is None:
-            return None
-        return item if item.offset < self.recaddr else NCList(self, item)
+        return self.variables.get(name)
 
     def declare(self, name, dtype, shape, unlim=None):
         if self.headsize:
@@ -512,12 +508,12 @@ class NCGroup(object):
             self.recsize = offset - self.recaddr
         recaddr, recsize = self.recaddr, self.recsize
         dimids = {name: i for i, name in enumerate(dims)}
-        recid = -1
+        recid = None
         for i, (_, n) in enumerate(itemsof(dims)):
             if not n:
                 recid = i
                 break
-        recid = [recid]
+        recid = [] if recid is None else [recid]
         iobe = dtype('>i8') if self.v64 else i4be
         rem = recsize & 3
         if rem:
@@ -649,8 +645,8 @@ _netcdf_stypes = [dtype('i1'), dtype('S1'), dtype('>i2'), dtype('>i4'),
 class NCLeaf(object):
     __slots__ = 'parent', 'index', 'offset', 'stype', 'shape', 'sshape'
 
-    def __init__(self, parent, index, offset, stype, shape, sshape):
-        self.parent = weakref.ref(parent)
+    def __init__(self, parent, index, offset, stype, shape, sshape, _wrp=None):
+        self.parent = parent if _wrp else weakref.ref(parent)
         self.index = index
         self.offset = offset
         self.stype = stype
@@ -670,7 +666,7 @@ class NCLeaf(object):
     def shift_by(self, delta):
         state = [getattr(self, nm) for nm in self.__slots__]
         state[2] += delta
-        return NCLeaf(*state)
+        return NCLeaf(*state, _wrp=1)
 
     def root(self):
         return self.parent()
