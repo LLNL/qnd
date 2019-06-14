@@ -1096,7 +1096,7 @@ _magic3 = re.compile(br'StructureChartAddress:\s*([0-9]+)\s*[\r\n\037]+'
                      br'!<<PDB:3>>![\r\n\037]+')
 
 # IEEE 754-2008 float, double, and quad precision formats
-_binary32 =  ( 32, 8,   23, 0, 1,  9, 0,   127)  # noqa IEEE 754 float
+_binary32 =  ( 32,  8,  23, 0, 1,  9, 0,   127)  # noqa IEEE 754 float
 _binary64 =  ( 64, 11,  52, 0, 1, 12, 0,  1023)  # noqa IEEE 754 double
 _binary128 = (128, 15, 112, 0, 1, 16, 0, 16383)  # noqa IEEE 754 quadruple
 # Intel 80 bit format is an example of IEEE 754-2008 binary64ext
