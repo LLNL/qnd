@@ -825,6 +825,7 @@ def _categorize(value, attrib=False):
         if kind == 'U':
             if value is not None:
                 value = npencode(value, 'utf8')  # convert to 'S'
+                dtype = value.dtype
         elif kind == 'O':
             raise ValueError("numpy dtype.kind 'O' not supported")
     return dtype, shape, value
