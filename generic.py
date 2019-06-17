@@ -359,7 +359,7 @@ class MultiFile(object):
 
     def declared(self, addr, dtype, nitems):
         """declare that array has been declared, maybe update next_address"""
-        addr = dtype.itemsize * nitems + addr
+        addr = (nitems if dtype is None else nitems * dtype.itemsize) + addr
         nextaddr = self.nextaddr
         if addr > nextaddr:
             self.nextaddr = nextaddr

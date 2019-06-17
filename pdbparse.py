@@ -56,6 +56,7 @@ class PDBChart(object):
     #            False means that i8 dtypes will be mapped to i4.
     # byteorder  Determines new stype corresponding to new primitive dtype.
     # structal   Initial struct alignment, before adding any members.
+    # csaddr     Chart and symtab address in header.
     # haspointers  Pointer types used: 0 none, 1 PDB style, 2 yorick style
     # primitives [name] --> stype, dtype, align, fpbits or None
     #            fpbits present only if stype is Vn for non-IEEE float.
@@ -83,7 +84,7 @@ class PDBChart(object):
     def __init__(self, root):
         self.root = weakref.ref(root)  # root() is top level PDBGroup
         self.hasint64 = False
-        self.structal = self.byteorder = None
+        self.structal = self.byteorder = self.csaddr = None
         self.haspointers = 0
         self.primitives = OrderedDict()
         self.structs = OrderedDict()
@@ -159,7 +160,7 @@ class PDBChart(object):
                 order = dtype.str[0]
                 order = 1 if order == '>' else (2 if order == '<' else 0)
             align = size  # WAG, could create align=1 record dtype to check
-            desc = size, order, align
+            desc = size, 0 if size == 1 else order, align
             adder = self.add_primitive
         else:
             align = self.structal
@@ -532,8 +533,11 @@ def parser(handle, root, index=0):
         root.pdb_version = version = 2
         n = 13 + (ord(header[13]) if PY2 else header[13])
         priminfo = map(ord, header[14:n]) if PY2 else [h for h in header[14:n]]
+        ma = _magic2a.match(header[n:])
+        if ma:  # save address of chart and symtab addresses for pdbdump
+            root.chart.csaddr = n + ma.end(2) + 2
         try:
-            nums = list(map(int, _magic2a.match(header[n:]).group(1, 2, 3, 4)))
+            nums = list(map(int, ma.group(1, 2, 3, 4)))
         except (AttributeError, ValueError):
             nums = [-1]
         if any(n < 0 for n in nums):
@@ -1559,7 +1563,7 @@ def _addrkey(item):
 # Primitive-Types:\n
 # <type>\001<nbytes>\001<alignment>\001<order>\001<moreorder>\001<more>\001\n
 #   <order> = 1 MSB first, 2 LSB first, -1 NO-CONV or FLOAT
-#   <moreorder> = DEFORDER  or  ORDER\0010\0011\001\2\0013
+#   <moreorder> = DEFORDER  or  ORDER\0010\0011\0012\0013
 #   <more> = NO-CONV or FIX or FLOAT\001nbits\001...bias
 # \002\n
 # Alignment:cpsilfd\n    alignments as 7 single bytes
