@@ -86,14 +86,14 @@ def initializer(f, root):
         chart.structal = structal = 0
     primitives = chart.primitives
     if not primitives:
-        descs = (('char', (1, 0, 0)), ('short', (2, order, 2)),
-                 ('integer', (4, order, 4)), ('long', (8, order, 8)),
-                 ('float', (4, order, 4, _binary32)),
-                 ('double', (8, order, 8, _binary64)),
-                 ('text', (1, 0, 0)))  # QnD-specific type for strings
+        descs = ((b'char', (1, 0, 0)), (b'short', (2, order, 2)),
+                 (b'integer', (4, order, 4)), (b'long', (8, order, 8)),
+                 (b'float', (4, order, 4, _binary32)),
+                 (b'double', (8, order, 8, _binary64)),
+                 (b'text', (1, 0, 0)))  # QnD-specific type for strings
         for name, desc in descs:
             chart.add_primitive(name, desc)
-    names = 'short', 'integer', 'long', 'float', 'double'
+    names = b'short', b'integer', b'long', b'float', b'double'
     prims = [primitives.get(name) for name in names]
     iords = ((1 if p[0].str[0] == '>' else 2) for p in prims[:3])
     ford, dord = [list(range(1, p[0].itemsize+1)) for p in prims[3:]]
@@ -250,7 +250,7 @@ def _dump_group(f, prefix, islist, group, blocks):
             continue
         item = group.lookup(name)
         islist = item.islist()
-        name = prefix + name
+        name = prefix + (name if PY2 else name.encode('utf8'))
         if item.isgroup() or islist == 2:
             # dump subdirectory
             _dump_group(f, name + b'/', islist, group, blocks)
