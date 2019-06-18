@@ -6,6 +6,8 @@ import sys
 
 from numpy import array, prod
 
+from .pdbparse import _binary32, _binary64
+
 PY2 = sys.version_info < (3,)
 if PY2:
 
@@ -57,37 +59,68 @@ def initializer_for(root):
 
 
 def initializer(f, root):
-    chart = root.chart  # root is a PDBGroup
-    byteorder = chart.byteorder
-    if byteorder is None:
+    handle, chart = root.handle, root.chart  # root is a PDBGroup
+    ifile = handle.current_file()
+    if ifile:
+        # Copy header and non-record vars from file 0 of the family.
+        f = handle.open(0)
+        header = f.read(128)
+        # We will also need to copy all non-record variables, so read
+        # them all now while we have file 0 open.
+        nrvars = [(item, item.read()) for item in _iter_nonrec(root)]
+        f = handle.open(ifile)
+        # Write wrong chart and symtab addresses, fixed by flusher later.
+        f.write(header)
+        # Then write out all the non-record variables we read from file 0.
+        addr0 = handle.zero_address()
+        for item, value in nrvars:
+            item.shifted_copy(addr0).write(value)
+        return
+    # Initializing first file of family, so we need to initialize chart.
+    order = chart.byteorder
+    if order is None:
         # PDB byte order is 1 for >, 2 for <
         # Here is a literal way to compute native byte order:
-        byteorder = chart.byteorder = int(array([1]).view('u1')[0] + 1)
-        # The fact that we're here means we should take the opportunity
-        # to initialize the chart to the native set of primitive types.
-    header = _be_header if byteorder == 1 else _le_header
+        order = chart.byteorder = int(array([1]).view('u1')[0] + 1)
+    primitives = chart.primitives
+    if not primitives:
+        descs = (('char', (1, 0, 0)), ('short', (2, order, 2)),
+                 ('integer', (4, order, 4)), ('long', (8, order, 8)),
+                 ('float', (4, order, 4, _binary32)),
+                 ('double', (8, order, 8, _binary64)),
+                 ('text', (1, 0, 0)))  # QnD-specific type for strings
+        for name, desc in descs:
+            chart.add_primitive(name, desc)
+    names = 'short', 'integer', 'long', 'float', 'double'
+    prims = [primitives.get(name) for name in names]
+    ford, dord = [list(range(1, p[0]+1)) for p in prims[3:]]
+    if prims[3][1] != 1:
+        ford = ford[::-1]
+    if prims[4][1] != 1:
+        dord = dord[::-1]
+    header = (b'!<<PDB:II>>!\n' + bytes((9 + prims[3][0] + prims[4][0],)) +
+              bytes(p[0] for p in [prims[2]] + prims) +
+              bytes(p[1] for p in prims[:3]) + bytes(ford) + bytes(dord))
+    fbias, dbias = prims[3:]
+    fbias = 127 if fbias is None else fbias
+    dbias = 1023 if fbias is None else dbias
+    header += _byt(fbias) + b'\x01' + _byt(dbias) + b'\x01\n'
+    # Record location of chart and symtab addresses, insert dummy values.
     chart.csaddr = len(header)
-    header += b'128\001128\001\n'  # bogus chart_addr = symtab_addr = 128
-    header += b'\x00' * (128 - len(header))  # null fill to 128 bytes
-    f.seek(0)
+    header += b'128\x01128\x01\n'
+    header += b'\x00' * (128 - len(header))
     f.write(header)
     # Set nextaddr to 128, which is where first data should begin.
-    handle = root.handle
     handle.declared(0, None, len(header))
 
 
-# Given that the byte order is the only difference among its
-# predefined i1, i2, i4, i8, f4, and f8 datatypes, there are
-# only two possible PDB headers - the big-endian and little-endian
-# variants.
-_be_header = (b'!<<PDB:II>>!\n\x15\x08\x02\x04\x08\x04\x08'
-              b'\x01\x01\x01\x01\x02\x03\x04\x01\x02\x03\x04\x05\x06\x07\x08'
-              b'\x20\x08\x17\x00\x01\x09\x00\x40\x0b\x44\x00\x01\x0c\x00'
-              b'127\0011023\001\n')
-_le_header = (b'!<<PDB:II>>!\n\x15\x08\x02\x04\x08\x04\x08'
-              b'\x02\x02\x02\x04\x03\x02\x01\x08\x07\x06\x05\x04\x03\x02\x01'
-              b'\x20\x08\x17\x00\x01\x09\x00\x40\x0b\x44\x00\x01\x0c\x00'
-              b'127\0011023\001\n')
+def _iter_nonrec(root):
+    for item in root:
+        if item.isleaf():
+            yield item
+        elif item.isgroup() and '__class__' not in item:
+            # Recurse into groups, but not into lists or objects of any type.
+            _iter_nonrec(item)
 
 
 def flusher(f, root):
@@ -153,19 +186,9 @@ def flusher(f, root):
             b'Primitive-Types:\n')
     if hasdirs:
         f.write(b'Directory\x011\x010\x01-1\x01DEFORDER\x01NO-CONV\x01\n')
-    fbias, dbias, fsize, dsize = 127, 1023, 4, 8
     for name, prim in itemsof(chart.primitives):
-        if name in (b'float', b'double'):
-            fpbits = prim[3]
-            if fpbits:
-                size, fpbits = fpbits[0], fpbits[3]
-                if name.startswith(b'f'):
-                    fbias, fsize = fpbits[7], size
-                else:
-                    dbias, dsize = fpbits[7], size
-            continue
         if name in (b'*', b'char', b'short', b'integer', b'long',
-                    b'Directory'):
+                    b'float', b'double', b'Directory'):
             continue  # skip standard data types, as yorick does
         stype, _, align, desc = prim
         if desc:  # desc = size, order, align, fpbits

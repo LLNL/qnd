@@ -59,10 +59,13 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
        of array variables).  With auto=2, a variable reference recursively
        reads subgroups, bringing a whole tree into memory.
     **kwargs
-       Other keywords.  The maxsize keyword sets the size of files in a
-       family generated in recording==1 mode; a new file will begin when
+       Other keywords.  The `maxsize` keyword sets the size of files in a
+       family generated in ``recording==1`` mode; a new file will begin when
        the first item in a new record would begin beyond `maxsize`.  The
-       default maxsize is 128 MiB (134 MB).
+       default maxsize is 128 MiB (134 MB).  The `order` keyword can be '>'
+       or '<' to force the byte order in a new file; by default the byte
+       order is the native order.  File families always have the same order
+       for every file, so `order` is ignored if any files exist.
 
     Returns
     -------
@@ -87,8 +90,15 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
 
     """
     maxsize = kwargs.pop('maxsize', 134217728)
+    order = kwargs.pop('order')
+    if order:
+        if order not in '<>':
+            raise ValueError("order must be either > or <")
+        order = 1 if order == '>' else 2
     handle, n = opener(filename, mode, **kwargs)
     root = PDBGroup(handle, maxsize)
+    if order and not n:
+        root.chart.byteorder = order
     for i in range(n):
         try:
             parser(handle, root, i)
@@ -361,6 +371,17 @@ class PDBLeaf(object):
                 v[()] = value
                 value = v
         value.tofile(f)
+
+    def shifted_copy(self, delta):
+        # Special helper for copying non-record variables for first file
+        # to later files in a family.
+        dtype, shape, addr = self.tsa
+        if isinstance(addr, list):
+            raise TypeError("cannot make shifted copy of record variable")
+        parent = self.parent()
+        if array(addr, 'u8') >> parent.root().handle.abits:
+            raise TypeError("expecting non-record vars to be in first file")
+        return PDBLeaf(self.parent(), addr+delta, dtype, shape, 0)
 
 
 def _align(addr, align):

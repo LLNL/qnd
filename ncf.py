@@ -459,6 +459,7 @@ class NCGroup(object):
             f.seek(8)
             value = f.read(self.recaddr)
             f = handle.open(ifile)
+            f.seek(8)
             f.write(value)
             return
 
