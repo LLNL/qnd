@@ -140,6 +140,10 @@ class PDBChart(object):
         by_dtype, nonenone = self.by_dtype, (None, None)
         # Need to declare anonymous type now.
         size = dtype.itemsize
+        if size == 1 and dtype.kind == 'S':
+            # Declare QnD-specific text primitive.
+            stype = self.add_primitive(b'text', (1, 0, 0))
+            return stype, 0, b'text'
         if dtype.kind == 'c':
             fsize = size // 2
             ffmt = npdtype('f{}'.format(fsize))
@@ -162,6 +166,14 @@ class PDBChart(object):
             align = size  # WAG, could create align=1 record dtype to check
             desc = size, 0 if size == 1 else order, align
             adder = self.add_primitive
+            if dtype.kind == 'f':
+                if size == 4:
+                    desc += (_binary32,)
+                elif size == 8:
+                    desc += (_binary64,)
+                else:
+                    raise NotImplementedError(
+                        "only f4 and f8 floating point dtypes supported")
         else:
             align = self.structal
             saveable = self._saveable
@@ -1534,7 +1546,7 @@ def _addrkey(item):
 #   fF = ord(header[23+sF+sD:30+sF+sD])
 #   fD = ord(header[30+sF+sD:37+sF+sD])
 # Notes:
-#   N = 9 + sF + sD
+#   N = 24 + sF + sD
 #   oS, oI, oL are 1 for big-endian, 2 for little-endian order
 #   pF, pD are 1-origin big-endian byte positions
 #     e.g.- pF = [4, 3, 2, 1] for little-endian, [1, 2, 3, 4] for big

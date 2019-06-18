@@ -850,8 +850,8 @@ def _reader(item, args):
                         value = npdecode(value, 'utf8')
                     except UnicodeDecodeError:
                         value = npdecode(value, 'latin1')
-                    if not value.shape:
-                        value = value[()]
+            if not value.shape:
+                value = value[()]
     return value
 
 

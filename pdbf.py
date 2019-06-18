@@ -90,15 +90,13 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
 
     """
     maxsize = kwargs.pop('maxsize', 134217728)
-    order = kwargs.pop('order')
+    order = kwargs.pop('order', None)
     if order:
         if order not in '<>':
             raise ValueError("order must be either > or <")
         order = 1 if order == '>' else 2
     handle, n = opener(filename, mode, **kwargs)
     root = PDBGroup(handle, maxsize)
-    if order and not n:
-        root.chart.byteorder = order
     for i in range(n):
         try:
             parser(handle, root, i)
@@ -110,6 +108,9 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
                               "".format(name))
             handle.open(i-1)
             warn("file family stopped by incompatible {}".format(name))
+    if not n and order:
+        root.chart.byteorder = order
+    # If file was freshly created, setting initializer calls it.
     handle.callbacks(flusher_for(root), initializer_for(root))
     return QGroup(root, auto=auto)
 
@@ -175,6 +176,10 @@ class PDBGroup(object):
             if dtype is None and name == '_':
                 # Assume we are creating a QList.
                 dtype = npdtype('u1')
+            elif isinstance(dtype, npdtype) and dtype.kind == 'S':
+                # frontend never passes 'U' dtype
+                shape = shape + (dtype.itemsize,)
+                dtype = npdtype('S1')
             item = PDBLeaf(self, addr, dtype, shape, unlim)
             if unlim:
                 item = QnDList(item, None if hasattr(addr, '__iter__') or
@@ -282,6 +287,7 @@ class PDBLeaf(object):
     def read(self, args=()):
         dtype, shape, addr = self.tsa
         dtype, stype, _, typename = dtype
+        istext = typename == b'text'
         if isinstance(addr, list):
             arg0 = args[0] if args else slice(None)
             args = args[1:]
@@ -312,6 +318,8 @@ class PDBLeaf(object):
             stype = dtype = value.dtype
         if nopartial:
             value = value.reshape(shape)[args]
+        if istext and value.shape:
+            return value.view('S' + str(value.shape[-1]))[..., 0]
         return value if stype is dtype else value.astype(dtype)
 
     def write(self, value, args=()):
@@ -323,7 +331,7 @@ class PDBLeaf(object):
         handle = root.handle
         if root.chart.nopartial(typename) is not None:
             raise TypeError("write to pointer type {} unsupported"
-                            "".format(typename))
+                            "".format(typename.decode('latin1')))
         if isinstance(addr, list):
             # This variable has blocks.
             if not isinstance(arg0, Integral):
@@ -364,7 +372,11 @@ class PDBLeaf(object):
             value = v
             f = seeker(addr)
         else:
-            value = ascontiguousarray(value, stype)
+            if stype.kind == 'S' and shape:
+                value = value.astype('S' + str(shape[-1]))
+                value = value.reshape(value.shape + (1,)).view('S1')
+            else:
+                value = ascontiguousarray(value, stype)
             if value.shape != shape:
                 # Avoid the recent (numpy 1.10) broadcast_to function.
                 v = zeros(shape, stype)

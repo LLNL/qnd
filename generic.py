@@ -222,7 +222,8 @@ class MultiFile(object):
     abits = 42
 
     def __init__(self, pattern, existing, future, mode):
-        if not existing:
+        newfile = not existing
+        if newfile:
             try:
                 existing = [next(future)]
             except StopIteration:
@@ -232,12 +233,15 @@ class MultiFile(object):
         current = 0
         self.f = open(pattern.format(existing[current]), mode)
         self.state = [mode, pattern, existing, current, future]
-        self._callbacks = None, None
+        self._callbacks = None, newfile
         self.nextaddr = 0
 
     def callbacks(self, flusher, initializer):
         """set callback function that flushes file metadata"""
+        newfile = self._callbacks[1]
         self._callbacks = flusher, initializer
+        if newfile == True:
+            initializer(self.f)
 
     def filename(self, n=None):
         """current or n-th existing filename in family"""
@@ -344,7 +348,7 @@ class MultiFile(object):
         f.seek(addr & mask)
         return f
 
-    def next_address(both=False, newfile=False):
+    def next_address(self, both=False, newfile=False):
         """next unused multi-file address, or None if newfile cannot create"""
         if newfile:
             try:
@@ -362,4 +366,4 @@ class MultiFile(object):
         addr = (nitems if dtype is None else nitems * dtype.itemsize) + addr
         nextaddr = self.nextaddr
         if addr > nextaddr:
-            self.nextaddr = nextaddr
+            self.nextaddr = addr

@@ -34,7 +34,7 @@ def initializer_for(root):
 
 
 # header[:13] = b'!<<PDB:II>>!\n'
-# header[13]  = N    count of single byte values (= 9 + sz_float + sz_double)
+# header[13]  = N    count of single byte values (= 24 + sz_float + sz_double)
 # header[14:20]) = sz_ptr, sz_short, sz_int, sz_long, sz_float, sz_double
 # header[20:23]) = ord_shot, ord_int, ord_long  (1 = >, 2 = < order)
 # header[23:23+sz_float] = (4, 3, 2, 1)  for <f4 byte permutation
@@ -77,11 +77,13 @@ def initializer(f, root):
             item.shifted_copy(addr0).write(value)
         return
     # Initializing first file of family, so we need to initialize chart.
-    order = chart.byteorder
+    order, structal = chart.byteorder, chart.structal
     if order is None:
         # PDB byte order is 1 for >, 2 for <
         # Here is a literal way to compute native byte order:
         order = chart.byteorder = int(array([1]).view('u1')[0] + 1)
+    if structal is None:
+        chart.structal = structal = 0
     primitives = chart.primitives
     if not primitives:
         descs = (('char', (1, 0, 0)), ('short', (2, order, 2)),
@@ -93,18 +95,22 @@ def initializer(f, root):
             chart.add_primitive(name, desc)
     names = 'short', 'integer', 'long', 'float', 'double'
     prims = [primitives.get(name) for name in names]
-    ford, dord = [list(range(1, p[0]+1)) for p in prims[3:]]
-    if prims[3][1] != 1:
+    iords = ((1 if p[0].str[0] == '>' else 2) for p in prims[:3])
+    ford, dord = [list(range(1, p[0].itemsize+1)) for p in prims[3:]]
+    if prims[3][0].str[0] == '<':
         ford = ford[::-1]
-    if prims[4][1] != 1:
+    if prims[4][0].str[0] == '<':
         dord = dord[::-1]
-    header = (b'!<<PDB:II>>!\n' + bytes((9 + prims[3][0] + prims[4][0],)) +
-              bytes(p[0] for p in [prims[2]] + prims) +
-              bytes(p[1] for p in prims[:3]) + bytes(ford) + bytes(dord))
-    fbias, dbias = prims[3:]
-    fbias = 127 if fbias is None else fbias
-    dbias = 1023 if fbias is None else dbias
-    header += _byt(fbias) + b'\x01' + _byt(dbias) + b'\x01\n'
+    sizes = [p[0].itemsize for p in [prims[2]] + prims]
+    header = (b'!<<PDB:II>>!\n' + tobytes((24 + sizes[4] + sizes[5],)) +
+              tobytes(sizes) + tobytes(iords) + tobytes(ford) + tobytes(dord))
+    fbits, dbits = [p[3] for p in prims[3:]]
+    if fbits is None:
+        fbits = _binary32
+    if dbits is None:
+        dbits = _binary64
+    header += tobytes(fbits[:7]) + tobytes(dbits[:7])
+    header += _byt(fbits[7]) + b'\x01' + _byt(dbits[7]) + b'\x01\n'
     # Record location of chart and symtab addresses, insert dummy values.
     chart.csaddr = len(header)
     header += b'128\x01128\x01\n'
@@ -165,7 +171,7 @@ def flusher(f, root):
     # Finally comes the extras section.
     f.write(b'Offset:0\n')  # Default index origin always 0.
     # Alignment: char, *, short, integer, long, float, double, \n
-    f.write(b'Alignment:' + bytes([1] + aligns[:6]) + b'\n')
+    f.write(b'Alignment:' + tobytes([1] + aligns[:6]) + b'\n')
     f.write(b'Struct-Alignment:' + _byt(chart.structal) + b'\n')
     # Yorick also writes synonym Struct-Align for old yorick bug workaround?
     # Date format "Sun Dec  7 06:00:00 1941" exactly 24 characters.
@@ -230,17 +236,19 @@ def flusher(f, root):
 
 def _dump_group(f, prefix, islist, group, blocks):
     # First dump the group itself as a bogus Directory object.
+    ignore_first = False
     if islist:
         group = group.parent()
         ignore_first = True
-    f.write(prefix + b'\x01Directory\x011\x01127\x01\n')
+    if prefix:
+        f.write(prefix + b'\x01Directory\x011\x01127\x01\n')
     for name in group:
         if ignore_first:
             # Write a bogus '_' symtab entry to indicate a QList.
             f.write(prefix + b'_\x01char\x011\x01127\x01\n')
             ignore_first = False
             continue
-        item = group[name]
+        item = group.lookup(name)
         islist = item.islist()
         name = prefix + name
         if item.isgroup() or islist == 2:
@@ -262,19 +270,21 @@ def _dump_group(f, prefix, islist, group, blocks):
         if islist:
             blocks.append((name, addr, size))
             addr = addr[0]
-        f.write(name + b'_\x01' + typename + b'\x01' + _byt(size) +
+        f.write(name + b'\x01' + typename + b'\x01' + _byt(size) +
                 b'\x01' + _byt(addr) + b'\x01' + shape + b'\n')
 
 
 if PY2:
     def _byt(number): return str(number)  # noqa
+    def tobytes(seq): return ''.join(chr(i) for i in seq)  # noqa
 else:
     def _byt(number): return str(number).encode()  # noqa
+    tobytes = bytes
 
 
 def _prim_order(order, size):
     return ((b'1' if order[0] <= (size >> 1) else b'2') + b'\x01ORDER\x01' +
-            b'\x01'.join(bytes((i,) for i in order) + b'\x01'))
+            b'\x01'.join(tobytes(order) + b'\x01'))
 
 
 # Primitive-Types representations of IEEE 754 binary32 and binary64 formats:
