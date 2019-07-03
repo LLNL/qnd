@@ -5,7 +5,6 @@ from __future__ import absolute_import
 
 from os.path import expanduser, expandvars, abspath, exists, commonprefix
 from itertools import count as itertools_count
-from string import ascii_lowercase, ascii_uppercase
 import glob
 import re
 import sys
@@ -82,7 +81,7 @@ def opener(filename, mode, **kwargs):
     """
     isstr = isinstance(filename, basestring)
     if isstr:
-        filename = expanduser(expandvars(filename))
+        filename = abspath(expanduser(expandvars(filename)))
         match = _digits_format.search(filename)
         if match:  # %0nd --> [0-9][0-9]... n times
             n = int(match.group(1) or '1')  # %d --> [0-9] once
@@ -126,7 +125,7 @@ def opener(filename, mode, **kwargs):
     future = None
     if match:
         if '+' in mode:
-            prefix = filename[:match.start()]
+            prefix, suffix = filename[:match.start()], filename
             predictable = 2
             while match:
                 predictable <<= 1
@@ -155,7 +154,7 @@ def opener(filename, mode, **kwargs):
                         # existing matches are all decimal numbers
                         nums = map(int, existing)
                         fmt = '{' + ':0{}d'.format(len(existing[0])) + '}'
-                        if all(f==fmt.format(n)
+                        if all(f == fmt.format(n)
                                for f, n in zip(existing, nums)):
                             existing = nums
                             future = itertools_count(existing[-1] + 1)
@@ -164,7 +163,7 @@ def opener(filename, mode, **kwargs):
                     elif fmt != '{}':
                         # pattern looked numerical, but matched non-digits
                         fmt, future = '{}', None
-                    elif all(len(f)==1 for f in existing):
+                    elif all(len(f) == 1 for f in existing):
                         # existing matches all non-digit single characters
                         final = existing[-1]
                         for f in future:
@@ -233,14 +232,14 @@ class MultiFile(object):
         current = 0
         self.f = open(pattern.format(existing[current]), mode)
         self.state = [mode, pattern, existing, current, future]
-        self._callbacks = None, newfile
+        self._callbacks = None, Ellipsis if newfile else None
         self.nextaddr = 0
 
     def callbacks(self, flusher, initializer):
         """set callback function that flushes file metadata"""
-        newfile = self._callbacks[1]
+        newfile = self._callbacks[1] is Ellipsis  # set in __init__ only
         self._callbacks = flusher, initializer
-        if newfile == True:
+        if newfile:
             initializer(self.f)
 
     def filename(self, n=None):
@@ -270,11 +269,9 @@ class MultiFile(object):
         elif not writeable:
             raise IOError("cannot create new file in read-only family")
         else:
-            try:
-                member = next(future)
-            except StopIteration:
-                raise IOError("no rule to compute family name following {}"
-                              "".format(pattern.format(existing[-1])))
+            member = next(future)
+            # Do not catch StopIteration here.  Instead handle in caller
+            # of next_address(newfile=1).
             if not mode.startswith('w'):
                 mode = 'w+b'
         if isnew:
@@ -290,7 +287,7 @@ class MultiFile(object):
             existing.append(member)
             self.nextaddr = n << self.abits
             initializer = self._callbacks[1]
-            if initializer is not None:
+            if initializer not in (None, Ellipsis):
                 # Note that initializer may call open recursively, but if
                 # so caller must take care to ensure that such a recursive
                 # call does not reach this point.
@@ -302,11 +299,18 @@ class MultiFile(object):
         mode = self.state[0]
         if mode.startswith('r') and '+' not in mode:
             return  # quick no-op for read-only files
-        flusher = self._callbacks[0]
-        if flusher is not None:
-            addr = self.tell()
-            flusher(self.seek(self.next_address()))
-            self.seek(addr)
+        existing, current = self.state[2:4]
+        if current + 1 == len(existing):
+            flusher = self._callbacks[0]
+            if flusher is not None:
+                i, nextaddr = self.split_address(self.nextaddr)
+                if i != current:
+                    raise AssertionError("(BUG) impossible current file value")
+                f = self.f
+                addr = f.tell()
+                f.seek(nextaddr)
+                flusher(f)
+                f.seek(addr)
         self.f.flush()
 
     def close(self):
@@ -335,18 +339,18 @@ class MultiFile(object):
 
     def seek(self, addr):
         """seek to multi-file address, opening alternate file if needed"""
-        current = self.state[3]
+        i, addr = self.split_address(addr)
+        f = self.open(i)
+        f.seek(addr)
+        return f
+
+    def split_address(self, addr):
+        """return file index, address for a multifile address"""
         abits = self.abits
         mask = (1 << (64 - abits)) - 1
-        c = (addr >> abits) & mask
-        if c != current:
-            self.close()
-            f = self.open(c)
-        else:
-            f = self.f
+        i = (addr >> abits) & mask
         mask = (1 << abits) - 1
-        f.seek(addr & mask)
-        return f
+        return i, addr & mask
 
     def next_address(self, both=False, newfile=False):
         """next unused multi-file address, or None if newfile cannot create"""
@@ -354,6 +358,7 @@ class MultiFile(object):
             try:
                 self.open(len(self.state[2]))
             except StopIteration:
+                # Signal caller that we have run out of filenames.
                 return None
         nextaddr = self.nextaddr
         if both:
