@@ -1159,7 +1159,7 @@ _1layouts = {1: ((b'char',    (1, 0, 0)), (b'short', (2, 1, 2)),   # sun3
 _line_re = re.compile(br'([^\r\n\037]*)[\r\n\037]')
 
 dim = br'\s*(\d+(?::\d+)?(?:\s*,\s*\d+(?::\d+)?)*)\s*'  # n[:n][,n[:n]]*
-dim = br'\s*(?:[[(]' + dim + br'[])]\s*)?'
+dim = br'\s*(?:[\[(]' + dim + br'[])]\s*)?'
 _memberdef = re.compile(br'\s*([^[(* \t]+)\s((?:\s*\*)*)'
                         br'([^[(* \t]+)' + dim + br'\s*$')
 _ptrheader = re.compile(br'(\d+)\001([^\001]+)\001'
