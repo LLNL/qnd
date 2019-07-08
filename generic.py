@@ -9,6 +9,8 @@ import glob
 import re
 import sys
 
+from numpy import uint64
+
 PY2 = sys.version_info < (3,)
 if PY2:
     range = xrange
@@ -346,6 +348,7 @@ class MultiFile(object):
 
     def split_address(self, addr):
         """return file index, address for a multifile address"""
+        addr = uint64(addr)  # even on 64 bit Windows, addr can be int32
         abits = self.abits
         mask = (1 << (64 - abits)) - 1
         i = (addr >> abits) & mask
