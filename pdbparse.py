@@ -28,7 +28,7 @@ from warnings import warn
 import weakref
 
 from numpy import (prod, array, arange, concatenate, zeros, dtype as npdtype,
-                   fromfile)
+                   fromfile, int64)
 
 PY2 = sys.version_info < (3,)
 if PY2:
@@ -438,10 +438,10 @@ class PDBChart(object):
         m = _ptrheader.match(header)
         if m:
             nitems, typename, addr, here = m.group(1, 2, 3, 4)
-            addr = -1 if addr is None else int(addr)
+            addr = int64(-1) if addr is None else int64(addr)
             if addr == -1:
                 return None  # This is a NULL pointer.
-            if here is not None and not int(here):
+            if here is not None and not int64(here):
                 # We need to get this pointee from elsewhere.
                 v = by_address.get(addr, Ellipsis)
                 if v is not Ellipsis:
@@ -456,7 +456,7 @@ class PDBChart(object):
             # address isn't used when data not here, this algorithm will
             # fail (e.g.- if addr for one not here points to another not
             # here in a chain).
-            nitems = int(nitems)
+            nitems = int64(nitems)
             typename = typename.strip()
             stype = self.primitives[typename]
             if stype is None:
@@ -480,7 +480,7 @@ class PDBChart(object):
         raise IOError("Unable to track PDB pointees at {}".format(addr0))
 
     def read_yorickptr(self, f, value, by_address):
-        addr = int(value[0])
+        addr = int64(value[0])
         v = by_address.get(addr, Ellipsis)
         if v is not Ellipsis:
             return v
@@ -495,16 +495,16 @@ class PDBChart(object):
         longstype = primitives[b'long'][0]
         if value.dtype is self._dtypes:
             # This is a yorick string.
-            n = 0 if null else fromfile(f, longstype, 1).astype(int)[0]
+            n = 0 if null else fromfile(f, longstype, 1).astype(int64)[0]
             return fromfile(f, npdtype('S{}'.format(n)), 1)[0] if n else b''
         # This is a general yorick pointee.
         if null:
             return None
-        ytype, ndim = fromfile(f, longstype, 2).astype(int)
+        ytype, ndim = fromfile(f, longstype, 2).astype(int64)
         if ytype < 0 or ytype >= len(yortypes) or ndim > 10:
             IOError("bad yorick pointee header at {}".format(addr))
         if ndim:
-            shape = tuple(fromfile(f, longstype, ndim).astype(int)[::-1])
+            shape = tuple(fromfile(f, longstype, ndim).astype(int64)[::-1])
             size = prod(shape)
         else:
             shape = ()
@@ -590,7 +590,7 @@ def parser(handle, root, index=0):
             # Version III PDB format, not legible by yorick.
             root.pdb_version = version = 3
             try:
-                chart, symtab = map(int, m.group(1, 2))
+                chart, symtab = map(int64, m.group(1, 2))
             except ValueError:
                 chart, symtab = -1, -1
             if chart <= 0 or symtab <= 0:
@@ -599,7 +599,7 @@ def parser(handle, root, index=0):
             # Legacy version 1 PDB format, no support for writing.
             root.pdb_version = version = 1
             try:
-                nums = map(int, m.group(1, 2, 3))
+                nums = map(int64, m.group(1, 2, 3))
             except (AttributeError, ValueError):
                 nums = [-1]
             if any(n < 0 for n in nums):
@@ -639,7 +639,7 @@ def parser(handle, root, index=0):
                 errors.append("empty or repeated type name: {}"
                               "".format(name.decode('latin1')))
                 raise ValueError
-            size = int(members[1])
+            size = int64(members[1])
             members = members[2:]
             if members:
                 mlist, members = members, OrderedDict()
@@ -682,7 +682,7 @@ def parser(handle, root, index=0):
         sym = line.split(b'\001')
         name = sym[0].strip()
         try:
-            lens = list(map(int, sym[2:-1]))  # always ends with ''
+            lens = list(map(int64, sym[2:-1]))  # always ends with ''
             count, addr = lens[0:2]
         except (IndexError, ValueError):
             errors.append("{} has bad symtab entry"
@@ -829,7 +829,7 @@ def parser(handle, root, index=0):
             continue
         name, n = name
         try:
-            n = list(map(int, n.split()))
+            n = list(map(int64, n.split()))
         except ValueError:
             errors.append("bad block count for {}"
                           "".format(name.decode('latin1')))
@@ -839,7 +839,7 @@ def parser(handle, root, index=0):
         if n > len(addcnt):
             for line in block_lines:  # increment block_lines iterator
                 try:
-                    addcnt += list(map(int, line.split()))
+                    addcnt += list(map(int64, line.split()))
                 except ValueError:
                     errors.append("bad block address for {}"
                                   "".format(name.decode('latin1')))
@@ -1216,7 +1216,7 @@ def _make_simple_list(addrs, chunk, count):
     n, na = count.sum(), addrs.size
     if na < n:
         indx = concatenate(([0], count))[:-1].cumsum()
-        ibcast = zeros(n, int)
+        ibcast = zeros(n, int64)
         ibcast[indx] = 1
         ibcast = ibcast.cumsum() - 1
         icount = arange(n) - indx[ibcast]
@@ -1332,7 +1332,7 @@ def _parse3(f, root, chart_contents, symtab_contents):
                     skippedcomp += 1
                 continue
             openstruct, size = match.group(1, 2)
-            size = int(size)
+            size = int64(size)
             members = OrderedDict()
             continue
         match = _pdb3_memb.match(line)
@@ -1412,7 +1412,7 @@ def _parse3(f, root, chart_contents, symtab_contents):
                     garbage += 1
                 continue
             typ, ind, sname, shape, addr, size = match.group(1, 2, 3, 4, 5, 6)
-            addr, size = int(addr), int(size)
+            addr, size = int64(addr), int64(size)
             if not shape and size > 1:
                 shape = (size,)
             else:
@@ -1438,7 +1438,7 @@ def _parse3(f, root, chart_contents, symtab_contents):
                     garbage += 1
                 continue
             addr, count = match.group(1, 2)
-            count = int(count)
+            count = int64(count)
             if not openblock:
                 if count:
                     openblock, nbspecs = addr, count
@@ -1450,7 +1450,7 @@ def _parse3(f, root, chart_contents, symtab_contents):
                 # Attempt to resynchronize, but probably hopelessly lost.
                 openblock, nbspecs = addr, count
                 continue
-            addr = int(addr)
+            addr = int64(addr)
             blocks.append((addr, count))
             nbspecs -= 1
             if not nbspecs:

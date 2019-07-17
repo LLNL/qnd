@@ -287,7 +287,7 @@ class MultiFile(object):
         # in a different file.  This assures nextaddr is in last file.
         if isnew:
             existing.append(member)
-            self.nextaddr = n << self.abits
+            self.nextaddr = uint64(n) << uint64(self.abits)
             initializer = self._callbacks[1]
             if initializer not in (None, Ellipsis):
                 # Note that initializer may call open recursively, but if
@@ -326,15 +326,16 @@ class MultiFile(object):
 
     def zero_address(self, n=None):
         """multifile address of first byte in current or n-th file"""
-        return (self.state[3] if n is None else n) << self.abits
+        return uint64(self.state[3] if n is None else n) << uint64(self.abits)
 
     # This is not used by pdbf module, but provide it anyway.
     def tell(self):
         """return current multi-file address"""
-        current = self.state[3]
-        abits = self.abits
-        mask = (1 << abits) - 1
-        addr = self.f.tell()
+        current = uint64(self.state[3])
+        abits = uint64(self.abits)
+        one = uint64(1)
+        mask = (one << abits) - one
+        addr = uint64(self.f.tell())
         if addr & ~mask:
             raise IOError("file too large for {} bit address".format(abits))
         return (current << abits) | addr
@@ -349,10 +350,17 @@ class MultiFile(object):
     def split_address(self, addr):
         """return file index, address for a multifile address"""
         addr = uint64(addr)  # even on 64 bit Windows, addr can be int32
-        abits = self.abits
-        mask = (1 << (64 - abits)) - 1
+        # There is a serious long standing bug in numpy type promotion rules
+        # which prevents uint64 from being useful when combined with any other
+        # integer type -- numpy will promote uint64 to float64 in a stupid
+        # attempt to find a signed type that can hold the result.
+        # This is completely different from C type promotion rules, in
+        # which signed gets promoted to unsigned (also a bad idea).
+        one = uint64(1)
+        abits = uint64(self.abits)
+        mask = (one << (uint64(64) - abits)) - one
         i = (addr >> abits) & mask
-        mask = (1 << abits) - 1
+        mask = (one << abits) - one
         return i, addr & mask
 
     def next_address(self, both=False, newfile=False):
@@ -363,15 +371,17 @@ class MultiFile(object):
             except StopIteration:
                 # Signal caller that we have run out of filenames.
                 return None
-        nextaddr = self.nextaddr
+        nextaddr = uint64(self.nextaddr)
         if both:
-            mask = (1 << self.abits) - 1
+            one = uint64(1)
+            mask = (one << uint64(self.abits)) - one
             return nextaddr, nextaddr & mask
         return nextaddr
 
     def declared(self, addr, dtype, nitems):
         """declare that array has been declared, maybe update next_address"""
-        addr = (nitems if dtype is None else nitems * dtype.itemsize) + addr
-        nextaddr = self.nextaddr
+        addr = (uint64(nitems if dtype is None else nitems * dtype.itemsize)
+                + uint64(addr))
+        nextaddr = uint64(self.nextaddr)
         if addr > nextaddr:
             self.nextaddr = addr
