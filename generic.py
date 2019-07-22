@@ -9,7 +9,7 @@ import glob
 import re
 import sys
 
-from numpy import uint64
+from numpy import int64, uint64  # Needed to work around Windows misfeatures.
 
 PY2 = sys.version_info < (3,)
 if PY2:
@@ -220,7 +220,9 @@ class MultiFile(object):
     # should be adequate for most purposes as of 2019.  You can always
     # override abits in an instance if necessary.
     # The address -1 is reserved to mean "no address", as in NULL pointer.
-    abits = 42
+    # Force abits to be int64 to work around Windows numpy misfeature in
+    # which 42 becomes int32.  We also explicitly convert
+    abits = int64(42)
 
     def __init__(self, pattern, existing, future, mode):
         newfile = not existing
@@ -235,7 +237,7 @@ class MultiFile(object):
         self.f = open(pattern.format(existing[current]), mode)
         self.state = [mode, pattern, existing, current, future]
         self._callbacks = None, Ellipsis if newfile else None
-        self.nextaddr = 0
+        self.nextaddr = int64(0)  # Definite type important on Windows.
 
     def callbacks(self, flusher, initializer):
         """set callback function that flushes file metadata"""
@@ -287,7 +289,7 @@ class MultiFile(object):
         # in a different file.  This assures nextaddr is in last file.
         if isnew:
             existing.append(member)
-            self.nextaddr = uint64(n) << uint64(self.abits)
+            self.nextaddr = int64(n) << self.abits
             initializer = self._callbacks[1]
             if initializer not in (None, Ellipsis):
                 # Note that initializer may call open recursively, but if
@@ -326,16 +328,16 @@ class MultiFile(object):
 
     def zero_address(self, n=None):
         """multifile address of first byte in current or n-th file"""
-        return uint64(self.state[3] if n is None else n) << uint64(self.abits)
+        return int64(self.state[3] if n is None else n) << self.abits
 
     # This is not used by pdbf module, but provide it anyway.
     def tell(self):
         """return current multi-file address"""
-        current = uint64(self.state[3])
-        abits = uint64(self.abits)
-        one = uint64(1)
+        current = int64(self.state[3])
+        abits = self.abits
+        one = int64(1)
         mask = (one << abits) - one
-        addr = uint64(self.f.tell())
+        addr = int64(self.f.tell())
         if addr & ~mask:
             raise IOError("file too large for {} bit address".format(abits))
         return (current << abits) | addr
@@ -349,16 +351,16 @@ class MultiFile(object):
 
     def split_address(self, addr):
         """return file index, address for a multifile address"""
-        addr = uint64(addr)  # even on 64 bit Windows, addr can be int32
         # There is a serious long standing bug in numpy type promotion rules
         # which prevents uint64 from being useful when combined with any other
         # integer type -- numpy will promote uint64 to float64 in a stupid
         # attempt to find a signed type that can hold the result.
         # This is completely different from C type promotion rules, in
         # which signed gets promoted to unsigned (also a bad idea).
-        one = uint64(1)
-        abits = uint64(self.abits)
-        mask = (one << (uint64(64) - abits)) - one
+        addr = int64(addr)  # even on 64 bit Windows, addr can be int32
+        one = int64(1)
+        abits = self.abits
+        mask = (one << (int64(64) - abits)) - one
         i = (addr >> abits) & mask
         mask = (one << abits) - one
         return i, addr & mask
@@ -371,17 +373,17 @@ class MultiFile(object):
             except StopIteration:
                 # Signal caller that we have run out of filenames.
                 return None
-        nextaddr = uint64(self.nextaddr)
+        nextaddr = int64(self.nextaddr)
         if both:
-            one = uint64(1)
-            mask = (one << uint64(self.abits)) - one
+            one = int64(1)
+            mask = (one << self.abits) - one
             return nextaddr, nextaddr & mask
         return nextaddr
 
     def declared(self, addr, dtype, nitems):
         """declare that array has been declared, maybe update next_address"""
-        addr = (uint64(nitems if dtype is None else nitems * dtype.itemsize)
-                + uint64(addr))
-        nextaddr = uint64(self.nextaddr)
-        if addr > nextaddr:
+        addr = int64((nitems if dtype is None else nitems * dtype.itemsize)
+                     + addr)
+        nextaddr = int64(self.nextaddr)
+        if uint64(addr) > uint64(nextaddr):
             self.nextaddr = addr
