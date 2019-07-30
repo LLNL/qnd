@@ -912,15 +912,16 @@ def parser(handle, root, index=0):
                 errors.append("unknown ORDER in primitive {}"
                               "".format(name.decode('latin1')))
                 raise ValueError
-            flag, line = line[i], line[i:-1]  # final element always ''
+            flag, line = line[i], line[i+1:]
             if flag == b'FLOAT':
-                if len(line) != 8:
+                if len(line) < 8:
                     errors.append("bad FLOAT in primitive {}"
                                   "".format(name.decode('latin1')))
                     raise ValueError
-                fbits = tuple(map(int, line))
+                fbits = tuple(map(int, line[:8]))
                 ptypes[name] = size, order, align, fbits
-            elif (flag in (b'FIX', b'NO-CONV')) and (not len(line)):
+                line = line[8:]
+            elif (flag in (b'FIX', b'NO-CONV')):
                 if flag == b'NO-CONV':
                     order = ()
                 ptypes[name] = size, order, align
@@ -928,6 +929,8 @@ def parser(handle, root, index=0):
                 errors.append("unrecognized primitive type {}"
                               "".format(name.decode('latin1')))
                 raise ValueError
+            # line may still contain UNSGNED an ONESCMP items
+            # also things like (TUPLE, float_complex, 2, -1) ?!
         except (ValueError, IndexError):
             errors.append("garbled primitive type {}"
                           "".format(name.decode('latin1')))
@@ -1048,7 +1051,7 @@ def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
 
     primitives, structs = chart.primitives, chart.structs
     undefined = set()
-    groups = {'': root}
+    groups = {b'': root}
     addr0 = root.handle.zero_address()
     for name, (addr, tname, shape) in itemsof(symtab):
         if name.startswith(b'/'):
