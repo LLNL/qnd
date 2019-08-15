@@ -674,17 +674,17 @@ class QGroup(ItemsAreAttrs):
             if recording:
                 if recording != 1 or dtype in (list, dict, object, None):
                     # Declare an anonymous-group-style list.
-                    item = this.declare(name, list)
+                    item = this.declare(name, list, None)
                 else:  # Declare item with UNLIMITED dimension.
                     item = this.declare(name, dtype, shape, 1)
                 # item now an empty list
             elif dtype == dict:
-                item = this.declare(name, dict)
+                item = this.declare(name, dict, None)
                 if value:
                     QGroup(item).update(value)
                 return
             elif dtype == list:
-                item = this.declare(name, list)
+                item = this.declare(name, list, None)
                 if value:
                     QList(item).extend(value)
                 return
