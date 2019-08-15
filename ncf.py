@@ -160,6 +160,7 @@ def ncparse(handle, root, ifile):
             raise IOError("first file in apparent family has no record vars")
         f = handle.open(ifile - 1)
         headsize = root.headsize
+        f.seek(0)
         static0 = f.read(headsize)
         f = handle.open(ifile)
         magic = f.read(4)
