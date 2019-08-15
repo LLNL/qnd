@@ -672,7 +672,11 @@ class QGroup(ItemsAreAttrs):
                 raise KeyError("partial write during declaration of {}"
                                "".format(name))
             if recording:
-                if recording != 1 or dtype in (list, dict, object, None):
+                # numpy (1.16.4) misfeature dtype('f8') tests == None
+                # (other dtypes are != None as expected), so cannot
+                # ask if (list, dict, object, None) contains dtype
+                if recording != 1 or (dtype is None or
+                                      dtype in (list, dict, object)):
                     # Declare an anonymous-group-style list.
                     item = this.declare(name, list, None)
                 else:  # Declare item with UNLIMITED dimension.
@@ -800,6 +804,8 @@ def _categorize(value, attrib=False):
     elif (isinstance(value, tuple) and len(value) == 2+bool(attrib) and
           isinstance(value[0], (type, _dtype))):
         dtype = value[0]
+        if dtype is not None and dtype not in (list, dict, object):
+            dtype = _dtype(dtype)  # no-op if already a dtype
         if not attrib:
             if dtype == list:
                 value, shape = value[1], None
@@ -1125,7 +1131,8 @@ class QList(object):
             if dtype is None and not args:
                 return
             raise TypeError("QLeaf {} declared as None".format(index))
-        if dtype in (list, dict, object, None):
+        # Work around numpy (1.16.4) misfeature dtype('f8') tests == None:
+        if dtype is None or dtype in (list, dict, object):
             raise TypeError("type mismatch setting QLeaf {}".format(index))
         item.write(value, args)
 
