@@ -718,6 +718,7 @@ class QGroup(ItemsAreAttrs):
                 if dtype == object:
                     _dump_object(item, value)
                     return
+                break
             if record is None:
                 if args:
                     record, args = args[0], args[1:]
