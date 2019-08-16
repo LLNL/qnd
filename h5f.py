@@ -225,4 +225,17 @@ class H5Leaf(object):
         return value
 
     def write(self, value, args=()):
-        self.h5item[args] = value
+        item = self.h5item
+        maxshape = item.maxshape
+        if (args and maxshape and maxshape[0] is None and
+                not any(n is None for n in maxshape[1:])):
+            # Create next element of an UNLIMITED array now.
+            try:
+                i = int(args[0])
+            except (TypeError, ValueError):
+                pass
+            else:
+                shape = item.shape
+                if shape[0] == i:
+                    item.resize((i+1,)+shape[1:])
+        item[args] = value

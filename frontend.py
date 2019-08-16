@@ -1442,6 +1442,6 @@ class QnDList(object):
 
     def write(self, value, args=()):
         qndlist = self._qnd_parent
-        qndlist._qnd_parent.write(value, (qndlist._qnd_current,) + args)
+        qndlist._qnd_parent.write(value, (self._qnd_current,) + args)
         # Turn off special empty list state (if on):
         qndlist._qnd_current = None
