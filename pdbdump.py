@@ -180,13 +180,15 @@ def flusher(f, root):
         date = date.encode()
     f.write(b'Version:11|' + date + b'\n')  # Yorick writes version 11.
     # PDBLib requires Major-Order: extra before Blocks: extra.
-    f.write(b'Major-Order:102\n')  # Array dimensions always in C order.
+    # Write array dimensions in Fortran order to match yorick and basis.
+    f.write(b'Major-Order:102\n')
     hasdirs = bool(prefix)
     f.write(b'Has-Directories:' + _byt(int(hasdirs)) + b'\n')
     f.write(b'Blocks:\n')
-    for name, addr, nitems in blocks:
-        f.write(name + b'\x01' + _byt(nitems) + b' ' +
-                b' '.join(_byt(a) + b' 1' for a in addr) + b'\n')
+    for name, addr, nitems, nblocks in blocks:
+        nitems = b' ' + _byt(nitems)
+        f.write(name + b'\x01' + _byt(nblocks) + b' ' +
+                b' '.join(_byt(a) + nitems for a in addr) + b'\n')
     f.write(b'\x02\n'
             b'Casts:\n\x02\n'
             b'Primitive-Types:\n')
@@ -262,13 +264,13 @@ def _dump_group(f, prefix, islist, group, blocks):
             shape = (1,) + (shape or ())
         if shape:
             size = prod(shape)
-            shape = b'\0x01'.join(b'0\x01' + _byt(s)
-                                  for s in shape) + b'\0x01'
+            shape = b'\x01'.join(b'0\x01' + _byt(s)
+                                  for s in reversed(shape)) + b'\x01'
         else:
             size = 1
             shape = b''
         if islist:
-            blocks.append((name, addr, size))
+            blocks.append((name, addr, size, len(item)))
             addr = addr[0]
         f.write(name + b'\x01' + typename + b'\x01' + _byt(size) +
                 b'\x01' + _byt(addr) + b'\x01' + shape + b'\n')

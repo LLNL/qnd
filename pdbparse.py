@@ -816,6 +816,9 @@ def parser(handle, root, index=0):
     garbled = False
     block_lines = iter(extras.pop(b'Blocks', ()))
     name = None
+    # Some block addresses may not be computable until after all data type
+    # item sizes are known.
+    deferred = {}
     for block in block_lines:  # block_lines may increment in loop body
         # Blocks:\n
         # <name>\001<nblocks>\x<addr> <nitems>...\n    where \x = \n or space
@@ -871,11 +874,18 @@ def parser(handle, root, index=0):
             continue
         count //= chunk  # number of slowest index positions
         # QnD interface wants simple list of block addresses.
-        baddr = _make_simple_list(addr, chunk, count)
-        addr, typ, shape = symtab[name]
-        # OrderedDict guarantees that replacing item value does not
-        # change its position in the sequence.
-        symtab[name] = baddr, typ, shape
+        saddr, typ, shape = symtab[name]
+        if (count == 1).all():
+            # Address of each block listed separately, so addr list
+            # can be used as-is.
+            # OrderedDict guarantees that replacing item value does not
+            # change its position in the sequence.
+            symtab[name] = addr.tolist(), typ, shape[1:]
+        else:
+            # Otherwise, we need to defer converting symtab[name] to
+            # blocks until we know the number of bytes per chunk.
+            deferred[name] = addr, chunk, count
+            import pdb;pdb.set_trace()
         name = None
     if name is not None:
         errors.append("block count address mismatch for {}"
@@ -1001,11 +1011,11 @@ def parser(handle, root, index=0):
     primtypes.update(ptypes)
 
     _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
-              recordsym)
+              deferred, recordsym)
 
 
 def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
-              recordsym=None):
+              deferred, recordsym=None):
     chart = root.chart
     chart.structal = structal
     chart.haspointers = haspointers
@@ -1054,6 +1064,7 @@ def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
     groups = {b'': root}
     addr0 = root.handle.zero_address()
     for name, (addr, tname, shape) in itemsof(symtab):
+        defblock = deferred.get(name)
         if name.startswith(b'/'):
             dirname, name = name.rsplit(b'/', 1)
             grp = groups.get(dirname)
@@ -1073,6 +1084,10 @@ def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
             if dtype is None:
                 undefined.add(tname)
                 continue
+        if defblock:
+            # Complicated Blocks: extra could not be processed until now
+            # that we know the number of bytes per item.
+            addr = _make_simple_list(dtype[0].itemsize, *defblock)
         unlim = hasattr(addr, '__iter__')  # match test in PDBLeaf.__init__
         if unlim:
             addr = (array(addr) + addr0).tolist()
@@ -1206,7 +1221,7 @@ def _flip_shapes(chart, symtab):
         symtab[name] = addr, typ, shape[::-1]
 
 
-def _make_simple_list(addrs, chunk, count):
+def _make_simple_list(itemsize, addrs, chunk, count):
     # Convert counted list of chunk addresses into a simple address list
     # with one chunk per element.
     # The crucial feature of this algorithm is that there is no explicit
@@ -1216,6 +1231,7 @@ def _make_simple_list(addrs, chunk, count):
     #   output = []
     #   for a, c in zip(addrs, count):
     #       output.extend(a + arange(c)*chunk)
+    chunk *= itemsize
     n, na = count.sum(), addrs.size
     if na < n:
         indx = concatenate(([0], count))[:-1].cumsum()
@@ -1375,6 +1391,7 @@ def _parse3(f, root, chart_contents, symtab_contents):
     slowest = -1 if fortran else 0
     tag = None
     openblock = blocks = nbspecs = None
+    deferred = {}
     for line in symtab_contents:
         line = line.group(1)
         match = _pdb3_tagline.match(line)
@@ -1474,11 +1491,14 @@ def _parse3(f, root, chart_contents, symtab_contents):
                     continue
                 count //= chunk  # number of slowest index positions
                 # QnD interface wants simple list of block addresses.
-                baddr = _make_simple_list(addr, chunk, count)
-                addr, typ, shape = symtab[name]
-                # OrderedDict guarantees that replacing item value does not
-                # change its position in the sequence.
-                symtab[name] = baddr, typ, shape
+                if (count == 1).all():
+                    # All chunk addresses given, convert symtab entry
+                    addr, typ, shape = symtab[name]
+                    # OrderedDict guarantees that replacing item value does
+                    # not change its position in the sequence.
+                    symtab[name] = addr.tolist(), typ, shape[1:]
+                else:
+                    deferred[name] = addr, chunk, count
     if openblock:
         errors.append("blocks for {} incomplete"
                       "".format(openblock.decode('latin1')))
@@ -1495,7 +1515,8 @@ def _parse3(f, root, chart_contents, symtab_contents):
         # Shapes are in little-endian order, reverse them.
         _flip_shapes(structs, symtab)
 
-    _endparse(root, structal, haspointers, ptypes, structs, symtab, errors)
+    _endparse(root, structal, haspointers, ptypes, structs, symtab, errors,
+              deferred)
 
 
 def _addrkey(item):
