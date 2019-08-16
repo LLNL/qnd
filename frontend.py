@@ -414,7 +414,9 @@ class QGroup(ItemsAreAttrs):
             val = float(val)
             n = values.size
             if n > 1:
-                i = interp(val, values, arange(n) + 0.5).astype(int)
+                # result of interp is float scalar in older numpy versions
+                # rather than numpy.float64, cannot use astype
+                i = int(interp(val, values, arange(n) + 0.5))
             else:
                 i = 0
             record = records[min(i, n-1)]
