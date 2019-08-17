@@ -243,7 +243,8 @@ from weakref import proxy, ProxyTypes
 from importlib import import_module
 import re
 
-from numpy import dtype, asfarray, asanyarray, arange, interp, where, prod
+from numpy import (dtype, asfarray, asanyarray, arange, interp, where, prod,
+                   ndarray)
 from numpy.core.defchararray import encode as npencode, decode as npdecode
 
 from .adict import ItemsAreAttrs, ADict
@@ -859,6 +860,8 @@ def _reader(item, args):
                         value = npdecode(value, 'utf8')
                     except UnicodeDecodeError:
                         value = npdecode(value, 'latin1')
+    if isinstance(value, ndarray) and not value.shape:
+        value = value[()]
     return value
 
 
