@@ -670,7 +670,7 @@ def parser(handle, root, index=0):
     # Parse the symtab_contents into an OrderedDict,
     # symbolname --> address, typename, shape
     symtab = []
-    haspointers = 0
+    haspointers = maybe_pointers = 0
     has_dirs = False
     recordsym = None
     basisnames = set()
@@ -708,6 +708,13 @@ def parser(handle, root, index=0):
                     name = bname
             if not has_dirs:
                 has_dirs |= typ == b'Directory' or name.startswith(b'/')
+            # Begin workaround of yorick bug that sometimes forgot to write
+            # string (and maybe pointer?) to Primitive-Types extra.
+            if not haspointers:
+                if typ == b'string':
+                    maybe_pointers |= 1
+                if typ == b'pointer':
+                    maybe_pointers |= 2
             symtab.append((name, (addr, typ, tuple(shape))))
         else:
             errors.append("{} has count mismatch"
@@ -944,37 +951,6 @@ def parser(handle, root, index=0):
         except (ValueError, IndexError):
             errors.append("garbled primitive type {}"
                           "".format(name.decode('latin1')))
-    if not haspointers:
-        string, pointer = ptypes.get(b'string'), ptypes.get(b'pointer')
-        desc = string or pointer
-        if string and pointer and string != pointer:
-            desc = None
-        if desc:
-            # At least one of string or pointer primitive present and
-            # both the same if both present.  Check that this common type
-            # is identical to long primitive.
-            ldesc = ptypes.get(b'long') or primtypes[3][1]
-            if ldesc[0::2] == desc[0::2]:
-                # Orders hard to compare, may be either permuation or flag.
-                lord, pord = ldesc[1], desc[1]
-                if lord == pord:
-                    haspointers = 2
-                if isinstance(lord, tuple) and not isinstance(pord, tuple):
-                    sord = tuple(range(1, len(lord)+1))
-                    if pord == 2:
-                        sord = sord[::-1]
-                    elif pord != 1:
-                        sord = ()
-                    if sord == lord:
-                        haspointers = 2
-                elif isinstance(pord, tuple) and not isinstance(lord, tuple):
-                    sord = tuple(range(1, len(pord)+1))
-                    if lord == 2:
-                        sord = sord[::-1]
-                    elif lord != 1:
-                        sord = ()
-                    if sord == pord:
-                        haspointers = 2
 
     # Yorick writes idiosyncratic chart and PrimitiveTypes, which is
     # important for how it interprets its own brand of pointers.
@@ -1009,6 +985,41 @@ def parser(handle, root, index=0):
     # extra supersedes the original primtypes.
     primtypes = OrderedDict(primtypes)
     primtypes.update(ptypes)
+    if not haspointers:
+        string, pointer = ptypes.get(b'string'), ptypes.get(b'pointer')
+        if not string and maybe_pointers & 1 and b'string' not in structs:
+            primtypes[b'string'] = string = primtypes[b'long']
+        if not pointer and maybe_pointers & 2 and b'pointer' not in structs:
+            primtypes[b'pointer'] = pointer = primtypes[b'long']
+        desc = string or pointer
+        if string and pointer and string != pointer:
+            desc = None
+        if desc:
+            # At least one of string or pointer primitive present and
+            # both the same if both present.  Check that this common type
+            # is identical to long primitive.
+            ldesc = primtypes[b'long']
+            if ldesc[0::2] == desc[0::2]:
+                # Orders hard to compare, may be either permuation or flag.
+                lord, pord = ldesc[1], desc[1]
+                if lord == pord:
+                    haspointers = 2
+                elif isinstance(lord, tuple) and not isinstance(pord, tuple):
+                    sord = tuple(range(1, len(lord)+1))
+                    if pord == 2:
+                        sord = sord[::-1]
+                    elif pord != 1:
+                        sord = ()
+                    if sord == lord:
+                        haspointers = 2
+                elif isinstance(pord, tuple) and not isinstance(lord, tuple):
+                    sord = tuple(range(1, len(pord)+1))
+                    if lord == 2:
+                        sord = sord[::-1]
+                    elif lord != 1:
+                        sord = ()
+                    if sord == pord:
+                        haspointers = 2
 
     _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
               deferred, recordsym)
@@ -1082,8 +1093,11 @@ def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
         if dtype is None:
             dtype = structs.get(tname)
             if dtype is None:
-                undefined.add(tname)
-                continue
+                if tname not in (b'string', b'pointer'):
+                    undefined.add(tname)
+                    continue
+                # Work around yorick bug that sometimes forgets to write
+                # Primitive-Types extras.
         if defblock:
             # Complicated Blocks: extra could not be processed until now
             # that we know the number of bytes per item.
