@@ -255,7 +255,7 @@ def _dump_group(f, prefix, islist, group, blocks):
         name = prefix + (name if PY2 else name.encode('utf8'))
         if item.isgroup() or islist == 2:
             # dump subdirectory
-            _dump_group(f, name + b'/', islist, group, blocks)
+            _dump_group(f, name + b'/', islist, item, blocks)
             continue
         # dump leaf (including block variables)
         typename, shape, addr = (item.parent() if islist else item).tsa

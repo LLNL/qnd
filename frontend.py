@@ -629,12 +629,11 @@ class QGroup(ItemsAreAttrs):
             raise KeyError("no such item in QGroup as {}".format(name))
         state = self._qnd_state
         auto, recording = state.auto, state.recording
-        recurse = auto if auto > 1 else 0
         record = state.goto
         if item.islist():
             item = QList(item, auto)
             if record is None:
-                if not args and not recurse:
+                if not args and auto <= 1:
                     return item
             else:
                 args = (record,) + args
@@ -646,8 +645,8 @@ class QGroup(ItemsAreAttrs):
         cls = item.lookup('__class__')
         if cls is not None:
             return _load_object(item, cls)
-        item = QGroup(item, auto=recurse, recording=recording, goto=record)
-        return item() if recurse else item
+        item = QGroup(item, auto=auto, recording=recording, goto=record)
+        return item() if auto > 1 else item
 
     def __setitem__(self, key, value):
         name, args = (key[0], key[1:]) if isinstance(key, tuple) else (key, ())
@@ -1098,14 +1097,12 @@ class QList(object):
         item = this.index(index)
         if item is None:
             raise IndexError("QList index {} out of range".format(index))
-        auto = recurse = self._qnd_auto
-        if recurse == 1:
-            recurse = 0
+        auto = self._qnd_auto
         if item.islist():
-            item = QList(item, recurse)
+            item = QList(item, auto)
             if args:
                 return item[args]
-            return item[:] if recurse else item
+            return item[:] if auto > 1 else item
         if item.isleaf():
             return _reader(item, args) if args or auto else QLeaf(item)
         # Item must be a group, set up inherited part of state.
@@ -1113,8 +1110,8 @@ class QList(object):
         cls = item.lookup('__class__')
         if cls is not None:
             return _load_object(item, cls)
-        item = QGroup(item, auto=recurse)
-        return item() if recurse else item
+        item = QGroup(item, auto=auto)
+        return item() if auto > 1 else item
 
     def __setitem__(self, key, value):
         if not isinstance(key, tuple):
