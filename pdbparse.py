@@ -673,7 +673,7 @@ def parser(handle, root, index=0):
     haspointers = maybe_pointers = 0
     has_dirs = False
     recordsym = None
-    basisnames = set()
+    basisnames, basismap, basisrecs = set(), {}, set()
     symtab_contents = _line_re.finditer(symtab_contents)
     for line in symtab_contents:
         line = line.group(1)
@@ -704,8 +704,13 @@ def parser(handle, root, index=0):
                 bname, pkg = name.split(b'@')
                 if pkg in (b'macro', b'funct'):
                     continue  # skip basis macros or functions
+                # Strip @pkg if no bname conflict.
                 if bname not in basisnames:
+                    basisnames.add(bname)
+                    basismap[name] = bname
                     name = bname
+                if pkg == b'history':
+                    basisrecs.add(name)
             if not has_dirs:
                 has_dirs |= typ == b'Directory' or name.startswith(b'/')
             # Begin workaround of yorick bug that sometimes forgot to write
@@ -864,6 +869,8 @@ def parser(handle, root, index=0):
             continue
         addcnt = array(addcnt)
         addr, count = addcnt[0::2], addcnt[1::2]
+        name = basismap.get(name, name)
+        basisrecs.discard(name)
         sym = symtab.get(name)
         if not sym:
             errors.append("block for non-existent variable {}"
@@ -881,22 +888,31 @@ def parser(handle, root, index=0):
             continue
         count //= chunk  # number of slowest index positions
         # QnD interface wants simple list of block addresses.
-        saddr, typ, shape = symtab[name]
         if (count == 1).all():
             # Address of each block listed separately, so addr list
             # can be used as-is.
             # OrderedDict guarantees that replacing item value does not
             # change its position in the sequence.
-            symtab[name] = addr.tolist(), typ, shape[1:]
+            symtab[name] = addr.tolist(), sym[1], shape[1:]
         else:
             # Otherwise, we need to defer converting symtab[name] to
             # blocks until we know the number of bytes per chunk.
             deferred[name] = addr, chunk, count
-            import pdb;pdb.set_trace()
         name = None
     if name is not None:
         errors.append("block count address mismatch for {}"
                       "".format(name.decode('latin1')))
+    # Treat basis variables marked with @history as record variables
+    # even if they have no blocks.
+    for name in basisrecs:
+        sym = symtab.get(name)
+        if sym is None:
+            continue  # Impossible to get here?
+        addr, typ, shape = sym
+        if not isinstance(addr, list):  # Impossible to fail this test?
+            addr = [addr]
+        shape = shape[1:] if shape and shape[0] == 1 else shape
+        symtab[name] = addr, typ, shape
 
     # Parse Primitive-Types extra to an OrderedDict:
     # typename --> size, order, align
