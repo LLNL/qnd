@@ -200,8 +200,11 @@ from __future__ import absolute_import
 # We attempt to store arbitrary python objects as a QGroup with member
 #   __class__ = 'modulename.classname' (or just classname for builtin)
 #   remainder of QGroup is the instance __dict__, unless __class__ has a
-#   __setstate__, in which case argument to that method stored in
+#   __setstate__, in which case argument to that method stored in the
 #   __setstate__ variable.
+#   If __class__ has a __getnewargs__, result is written sub-QGroup with
+#   _0, _1, ..., which will be passed to the class constructor -- otherwise
+#   the class starts empty and neither __new__ nor __init__ is called.
 #   List or tuple objects not distinguished, becoming QList items.
 #   Dict objects with non-text keys stored with __class__ = 'dict' and
 #   members _0, _1, _2, etc., where even item is key and following odd item
@@ -213,7 +216,7 @@ from __future__ import absolute_import
 # This qnd module also provides a low level QnDList implementation of the
 # QList in terms of the backend QGroup (recording=2) and QLeaf (recording=1)
 # implementations, for backends which do not support a native list type.
-# The convention is that a generic QList is a QGroup with __class__ = 'list'
+# The convention is that a generic QList is a QGroup with a blank member _
 # and members _0, _1, _2, etc.  If the backend supports QLeaf arrays with an
 # UNLIMITED leading dimension, these can also be presented as QList
 # variables by the QnD API.
@@ -255,7 +258,7 @@ if PY2:
 else:
     basestring = str
 _NOT_PRESENT_ = object()
-_us_digits = re.compile(r'^_\d*$')
+_us_digits = re.compile(r"^_\d*$")
 
 
 class QGroup(ItemsAreAttrs):
@@ -335,17 +338,17 @@ class QGroup(ItemsAreAttrs):
        Always None.
 
     """
-    __slots__ = '_qnd_group', '_qnd_state', '_qnd_cache', '__weakref__'
+    __slots__ = "_qnd_group", "_qnd_state", "_qnd_cache", "__weakref__"
     isgroup = 1
     islist = isleaf = 0
     dtype, shape, ndim, size, sshape = dict, None, None, None, None
 
     def __init__(self, item=None, state=None, auto=None, recording=None,
                  goto=None):
-        object.__setattr__(self, '_qnd_group', item)
-        object.__setattr__(self, '_qnd_state',
+        object.__setattr__(self, "_qnd_group", item)
+        object.__setattr__(self, "_qnd_state",
                            QState() if state is None else QState(state))
-        object.__setattr__(self, '_qnd_cache', None)
+        object.__setattr__(self, "_qnd_cache", None)
         state = self._qnd_state
         if auto is not None:
             state.auto = int(auto)
@@ -446,7 +449,7 @@ class QGroup(ItemsAreAttrs):
             values = _monotonize(values)
             if not cache:
                 cache = {}
-                object.__setattr__(self, '_qnd_cache', cache)
+                object.__setattr__(self, "_qnd_cache", cache)
             cache[name] = values
         return values  # returned by _monotonize
 
@@ -513,7 +516,7 @@ class QGroup(ItemsAreAttrs):
         """
         if nlevels is None:
             nlevels = 1
-        elif nlevels == 'all':
+        elif nlevels == "all":
             nlevels = len(self._qnd_state) - 3
         while nlevels >= 0:
             if self._qnd_state.drop() and close:
@@ -524,7 +527,7 @@ class QGroup(ItemsAreAttrs):
         """Close associated file."""
         this = self._qnd_group
         if this is not None:
-            for nm in ['_qnd_group', '_qnd_state', '_qnd_cache']:
+            for nm in ["_qnd_group", "_qnd_state", "_qnd_cache"]:
                 object.__setattr__(self, nm, None)
             this.close()
 
@@ -609,13 +612,13 @@ class QGroup(ItemsAreAttrs):
             key = (list(self._qnd_group),)
         name, args = key[0], key[1:]
         if isinstance(name, basestring):
-            if '/' in name:
-                if name.startswith('/'):
+            if "/" in name:
+                if name.startswith("/"):
                     return self.root()[(name[1:],) + args]
-                name = name.split('/')
+                name = name.split("/")
                 name, args = name[0], tuple(name[1:]) + args
         else:
-            # qg[['name1', 'name2', ...], slice0, ...]
+            # qg[["name1", "name2", ...], slice0, ...]
             # returns [qg.name1[slice0, ...], qg.name2[slice0, ...], ...]
             items = []
             for key in name:
@@ -642,8 +645,8 @@ class QGroup(ItemsAreAttrs):
             return _reader(item, args) if args or auto else QLeaf(item)
         # Item must be a group, set up inherited part of state.
         # Note that goto record was not used, so subgroup inherits it.
-        cls = item.lookup('__class__')
-        if cls is not None:
+        cls = item.lookup("__class__")
+        if cls is not None and auto:
             return _load_object(item, cls)
         item = QGroup(item, auto=auto, recording=recording, goto=record)
         return item() if auto > 1 else item
@@ -651,13 +654,13 @@ class QGroup(ItemsAreAttrs):
     def __setitem__(self, key, value):
         name, args = (key[0], key[1:]) if isinstance(key, tuple) else (key, ())
         if not isinstance(name, basestring):
-            name = '/'.join(name)
-        if '/' in name:
-            if name.startswith('/'):
+            name = "/".join(name)
+        if "/" in name:
+            if name.startswith("/"):
                 item = self.root()
                 name = name[1:]
             else:
-                path, name = name.rsplit('/', 1)
+                path, name = name.rsplit("/", 1)
                 with self.push():
                     self.auto = 0
                     item = self[path]
@@ -822,7 +825,7 @@ def _categorize(value, attrib=False):
             dtype, shape = object, None
         else:
             dtype, shape = v.dtype, v.shape
-            if dtype.kind == 'O':
+            if dtype.kind == "O":
                 if not shape:
                     dtype, shape = object, None
                 else:
@@ -831,34 +834,34 @@ def _categorize(value, attrib=False):
                 value = v
     if isinstance(dtype, _dtype):
         kind = dtype.kind
-        if kind == 'U':
+        if kind == "U":
             if value is not None:
-                value = npencode(value, 'utf8')  # convert to 'S'
+                value = npencode(value, "utf8")  # convert to 'S'
                 dtype = value.dtype
-        elif kind == 'O':
+        elif kind == "O":
             raise ValueError("numpy dtype.kind 'O' not supported")
     return dtype, shape, value
 
 
 def _reader(item, args):
     value = item.read(args)
-    dtyp = getattr(value, 'dtype', None)
+    dtyp = getattr(value, "dtype", None)
     if dtyp is not None:
         kind = dtyp.kind
-        if kind == 'V':
+        if kind == "V":
             if dtyp.names:
                 # The recarray has some significant misfeatures.  The worst
                 # is that it will not print (repr or str) if it is aligned,
                 # or simply if the itemsize does not match what it expects.
                 # value = value.view(recarray)
                 pass
-        elif kind in 'SU':
+        elif kind in "SU":
             if not PY2:
-                if dtyp.kind == 'S':
+                if dtyp.kind == "S":
                     try:
-                        value = npdecode(value, 'utf8')
+                        value = npdecode(value, "utf8")
                     except UnicodeDecodeError:
-                        value = npdecode(value, 'latin1')
+                        value = npdecode(value, "latin1")
     if isinstance(value, ndarray) and not value.shape:
         value = value[()]
     return value
@@ -873,51 +876,99 @@ def _dump_object(item, value):
     item = QGroup(item)
     if isinstance(value, dict):
         # special case for dict with non-text keys
-        item['__class__'] = 'dict'
+        item["__class__"] = "dict"
         items = value.iteritems if PY2 else value.items
-        val = {}
         for i, (k, v) in enumerate(items()):
-            val['_' + str(2*i)] = k
-            val['_' + str(2*i+1)] = v
-        value = val
+            item["_" + str(2*i)] = k
+            item["_" + str(2*i+1)] = v
     else:
         cls = value.__class__
         cname, module = cls.__name__, cls.__module__
         if module is not None and module != _builtin_module:
-            cname = '.'.join([module, cname])
-        item['__class__'] = cname
-        setter = hasattr(value, '__setstate__')
-        getter = getattr(value, '__getstate__', None)
-        value = value.__dict__ if getter is None else getter()
+            cname = ".".join((module, cname))
+        item["__class__"] = cname
+        # Note that __getnewargs_ex__ is python3 only, so we skip
+        # it here.  The recommendation in the python3 docs is to use
+        # the _ex version only if __new__ requires keyword arguments.
+        # Similarly, we do not support the python2-only __getinitargs__.
+        getnew = getattr(value, "__getnewargs__", None)
+        setter = hasattr(value, "__setstate__")
+        getter = getattr(value, "__getstate__", None)
+        if getnew:
+            args = getnew()
+        elif not getter:
+            # We cannot handle the intricacies of the full
+            # pickle/copyreg protocol, but by handling one simple
+            # case of __reduce__ we can pick up both slice() and set()
+            # objects, which is worthwhile.
+            # Virtually all objects have a __reduce__ method, which
+            # will often raise a TypeError.  Go ahead and blow up here.
+            getnew = value.__reduce__()
+            if getnew[0] != cls or any(v is not None for v in getnew[2:]):
+                raise TypeError("QnD cannot dump class {}".format(cname))
+            args = getnew[1]
+        if getnew:
+            item["__getnewargs__"] = {}
+            subdir = item["__getnewargs__"]
+            for i, arg in enumerate(args):
+                subdir["_" + str(i)] = arg
+        value = getter() if getter else getattr(value, "__dict__", None)
         if setter:
+            # __setstate__ only called if __getstate__ not false
             # Never convert lists or tuples to ndarrays here.  (??)
-            if isinstance(value, (list, tuple)):
-                value = list, value
-            value = {'__setstate__': value}
-    item.update(value)
+            if value:
+                if isinstance(value, (list, tuple)):
+                    value = list, value
+                item["__setstate__"] = value
+        elif value:
+            item.update(value)
 
 
 def _load_object(qgroup, cls):
-    n = len(qgroup) - 1  # less __class__ item
-    qgroup = QGroup(qgroup, auto=2)
+    # If you fail here, you can still read the group with ADict(qgroup)
+    # which avoids this special treatment.
     cls = cls.read()  # assume QLeaf yields a text string
-    if cls == 'dict':
+    if not isinstance(cls, basestring):
+        raise TypeError("Expecting __class__ member of QGroup to be text.")
+    qgroup = QGroup(qgroup, auto=2)
+    if cls == "dict":
         obj = {}
-        for i in range(0, n, 2):
-            obj[qgroup['_' + str(i)]] = qgroup['_' + str(i+1)]
+        names = list(name for name in qgroup if name != "__class__")
+        if len(names) & 1:
+            names[0] = ""  # die in first pass
+        key = None
+        for i, n in enumerate(sorted(names)):
+            if "_{}".format(i) != n:
+                raise TypeError("QGroup with __class__ dict error")
+            value = qgroup[n]
+            if i & 1:
+                obj[key] = value
+            else:
+                key = value
     else:
-        cls = cls.rsplit('.', 1)
-        module = (import_module(cls[0]) if len(cls) > 1 else
-                  sys.modules[_builtin_module])
-        cls = getattr(module, cls[-1])
-        obj = object.__new__(cls)
-        setter = getattr(obj, '__setstate__', None)
-        if setter:
-            setter(qgroup['__setstate__'])
+        cls = cls.rsplit(".", 1)
+        try:
+            module = (import_module(cls[0]) if len(cls) > 1 else
+                      sys.modules[_builtin_module])
+            cls = getattr(module, cls[-1])
+        except (ImportError, AttributeError):
+            # If the named module does not exist or does not have
+            # the specified class, just return an ADict.
+            return ADict(qgroup)
+        args = qgroup.get("__getnewargs__")
+        if args is not None:
+            args = [args["_" + str(i)] for i in range(len(args))]
+            obj = cls(*args)
         else:
-            names = list(qgroup)
-            names.remove('__class__')
-            obj.__dict__.update(qgroup(names))
+            obj = object.__new__(cls)
+        args = qgroup.get("__setstate__")
+        if args is not None:
+            obj.__setstate__(args)
+        else:
+            names = list(name for name in qgroup
+                         if name not in ["__class__", "__getnewargs__"])
+            if names:
+                obj.__dict__.update(qgroup(names))
     return obj
 
 
@@ -926,7 +977,7 @@ class QState(list):
     __slots__ = ()
 
     def __init__(self, recording=0, goto=None, auto=0):
-        if hasattr(recording, '__iter__'):
+        if hasattr(recording, "__iter__"):
             seq = tuple(recording)[:3]
         else:
             if goto is not None:
@@ -1011,17 +1062,17 @@ class QList(object):
        Always None.
 
     """
-    __slots__ = '_qnd_list', '_qnd_auto'
+    __slots__ = "_qnd_list", "_qnd_auto"
     isgroup = isleaf = 0
     dtype, shape, ndim, size, sshape = list, None, None, None, None
 
     def __init__(self, item=None, auto=0):
-        object.__setattr__(self, '_qnd_list', item)
+        object.__setattr__(self, "_qnd_list", item)
         self.auto(auto)
 
     def auto(self, recurse):
         """Set auto read mode, analogous to QGroup.auto method."""
-        object.__setattr__(self, '_qnd_auto', int(recurse))
+        object.__setattr__(self, "_qnd_auto", int(recurse))
 
     def root(self):
         """Return root QGroup for this item."""
@@ -1071,7 +1122,7 @@ class QList(object):
         recurse = auto > 1
         for item in self._qnd_list:
             if item.isgroup():
-                cls = item.lookup('__class__')
+                cls = item.lookup("__class__") if auto else None
                 if cls is None:
                     item, readit = QGroup(item), recurse
                 else:
@@ -1092,7 +1143,7 @@ class QList(object):
         this = self._qnd_list
         if isinstance(index, slice):
             index = range(*index.indices(len(this)))
-        if hasattr(index, '__iter__'):
+        if hasattr(index, "__iter__"):
             return [self[(i,) + args] for i in index]
         item = this.index(index)
         if item is None:
@@ -1107,8 +1158,8 @@ class QList(object):
             return _reader(item, args) if args or auto else QLeaf(item)
         # Item must be a group, set up inherited part of state.
         # Note that goto record was not used, so subgroup inherits it.
-        cls = item.lookup('__class__')
-        if cls is not None:
+        cls = item.lookup("__class__")
+        if cls is not None and auto:
             return _load_object(item, cls)
         item = QGroup(item, auto=auto)
         return item() if auto > 1 else item
@@ -1117,7 +1168,7 @@ class QList(object):
         if not isinstance(key, tuple):
             key = (key,)
         index, args = key[0], key[1:]
-        if isinstance(index, slice) or hasattr(index, '__iter__'):
+        if isinstance(index, slice) or hasattr(index, "__iter__"):
             raise TypeError("QList does not support multi-element setitem")
         dtype, shape, value = _categorize(value)
         item = self._qnd_list.index(index)
@@ -1171,12 +1222,12 @@ class QLeaf(object):
        type str instead of int.
 
     """
-    __slots__ = '_qnd_leaf',
+    __slots__ = "_qnd_leaf",
     isgroup = islist = 0
     isleaf = 1
 
     def __init__(self, item):
-        object.__setattr__(self, '_qnd_leaf', item)
+        object.__setattr__(self, "_qnd_leaf", item)
 
     def root(self):
         """Return root QGroup for this item."""
@@ -1234,13 +1285,13 @@ class QAttributes(ItemsAreAttrs):
        for aname, value in qa0.items(): do_something
 
     """
-    __slots__ = '_qnd_parent', '_qnd_vname'
+    __slots__ = "_qnd_parent", "_qnd_vname", "__weakref__"
 
     def __init__(self, parent, vname=None):
         if not isinstance(parent, ProxyTypes):
             parent = proxy(parent)
-        object.__setattr__(self, '_qnd_parent', parent)
-        object.__setattr__(self, '_qnd_vname', vname)
+        object.__setattr__(self, "_qnd_parent", parent)
+        object.__setattr__(self, "_qnd_vname", vname)
 
     def __repr__(self):
         vname = self._qnd_vname
@@ -1255,7 +1306,7 @@ class QAttributes(ItemsAreAttrs):
         if vname is None:
             # Get group attribute, even though that is inconsistent...
             # Should we implement matching set() or just let it go?
-            vname = ''
+            vname = ""
         else:
             parent = parent._qnd_parent
         return parent.attget(vname).get(key, default)
@@ -1284,19 +1335,19 @@ class QAttributes(ItemsAreAttrs):
         # have these names.
         item = self._qnd_parent._qnd_parent.lookup(vname)
         if item.isgroup():
-            return dict if name == 'dtype' else None
+            return dict if name == "dtype" else None
         if item.islist():
-            return list if name == 'dtype' else None
+            return list if name == "dtype" else None
         dsss = item.query()
         if dsss[0] is None:
             return None
-        if name == 'ndim':
+        if name == "ndim":
             return len(dsss[1])
-        if name == 'size':
+        if name == "size":
             return prod(dsss[1])
         return dsss[self._qnd_builtins_.index(name)]
 
-    _qnd_builtins_ = ['dtype', 'shape', 'sshape', 'size', 'ndim']
+    _qnd_builtins_ = ["dtype", "shape", "sshape", "size", "ndim"]
 
     def __getitem__(self, key):
         parent, vname = self._qnd_parent, self._qnd_vname
@@ -1305,7 +1356,7 @@ class QAttributes(ItemsAreAttrs):
             item = parent.lookup(key)
             if item is None:
                 raise KeyError("no such item in QGroup as {}".format(key))
-            return QAttributes(self, vname)
+            return QAttributes(self, key)
         return parent._qnd_parent.attget(vname).get(key)
 
     def __setitem__(self, key, value):
@@ -1350,22 +1401,23 @@ class QnDList(object):
        item = QnDList.fromgroup(QnDGroup)
 
     """
-    __slots__ = '_qnd_parent', '_qnd_current',
+    __slots__ = "_qnd_parent", "_qnd_current",
 
     def __init__(self, parent, empty=None):
         self._qnd_parent = parent
         current = empty
         if empty is not None:
             if parent.isgroup():
-                parent.declare('_', None, ())
+                parent.declare("_", None, ())
             elif not isinstance(parent, QnDList):
                 current = -1
         self._qnd_current = current
 
-    def fromgroup(self, parent):
-        item = parent.lookup('_')
+    @staticmethod
+    def fromgroup(parent):
+        item = parent.lookup("_")
         if item is not None:
-            if all(_us_digit.match(name) for name in parent):
+            if all(_us_digits.match(name) for name in parent):
                 return QnDList(parent)  # parent is a pseudo-list
         return parent
 
@@ -1401,7 +1453,7 @@ class QnDList(object):
         parent = self._qnd_parent
         if parent.isgroup():
             for i in range(len(self)):
-                yield parent.lookup('_' + str(i))
+                yield parent.lookup("_" + str(i))
         else:
             for i in range(len(self)):
                 yield QnDList(self, i)
@@ -1414,14 +1466,14 @@ class QnDList(object):
             return None  # out of range, let caller raise any exception
         parent = self._qnd_parent
         if parent.isgroup():
-            return parent.lookup('_' + str(nrecs))
+            return parent.lookup("_" + str(nrecs))
         return QnDList(self, ndx)
 
     def declare(self, dtype, shape):
         parent = self._qnd_parent
         nrecs = len(self)
         if parent.isgroup():
-            return parent.declare('_' + str(nrecs), dtype, shape)
+            return parent.declare("_" + str(nrecs), dtype, shape)
         return QnDList(self, nrecs)
 
     # query, read, write are leaf methods, assume isleaf() true

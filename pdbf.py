@@ -154,7 +154,10 @@ class PDBGroup(object):
         return iter(self.items)
 
     def lookup(self, name):
-        return self.items.get(name)
+        item = self.items.get(name)
+        if isinstance(item, PDBGroup):
+            item = QnDList.fromgroup(item)
+        return item
 
     def declare(self, name, dtype, shape, unlim=None, addr=-1):
         current = self.items.get(name)
@@ -214,7 +217,7 @@ class PDBGroup(object):
             item = item.parent()
         attrs = item.attrs
         if attrs is None:
-            item.attrs = attrs = PDBAttrs(item)
+            item.attrs = attrs = PDBAttrs()
         return attrs
 
     def attset(self, vname, aname, dtype, shape, value):
@@ -223,7 +226,7 @@ class PDBGroup(object):
             item = item.parent()
         attrs = item.attrs
         if attrs is None:
-            item.attrs = attrs = PDBAttrs(item)
+            item.attrs = attrs = PDBAttrs()
         if value.dtype != dtype or value.shape != shape:
             v = zeros(shape, dtype)
             v[()] = value

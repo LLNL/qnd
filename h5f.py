@@ -23,7 +23,7 @@ from os.path import expanduser, expandvars
 
 from h5py import File, Group, Dataset, Datatype
 
-from numpy import zeros
+from numpy import zeros, dtype as npdtype
 
 from .frontend import QGroup, QnDList
 
@@ -131,10 +131,10 @@ class H5Group(object):
         if dtype == list:
             return QnDList(h5item.create_group(name), 1)
         if dtype is None or (shape and not all(shape)):
-            h5item[name] = dtype('u1') if dtype is None else dtype
+            h5item[name] = npdtype('u1') if dtype is None else dtype
             item = h5item[name]
             if dtype is None:
-                item.attrs['__None__'] = True
+                item.attrs['__none__'] = True
             else:
                 item.attrs['__shape__'] = shape
         elif unlim:
@@ -210,7 +210,10 @@ class H5Leaf(object):
         if isinstance(h5item, Datatype):
             shape = h5item.attrs.get('__shape__')
             if shape is None:
-                return None, (), ()
+                if h5item.attrs.get('__none__'):
+                    return None, (), ()
+                else:
+                    return type, (), ()
         else:
             shape = h5item.shape
         return h5item.dtype, shape, shape
@@ -219,6 +222,11 @@ class H5Leaf(object):
         h5item = self.h5item
         if isinstance(h5item, Datatype):
             shape = h5item.attrs.get('__shape__')
+            if shape is None:
+                if h5item.attrs.get('__none__'):
+                    return None
+                else:
+                    return h5item.dtype
             value = zeros(shape, h5item.dtype)
         else:
             value = h5item[args]
@@ -226,6 +234,8 @@ class H5Leaf(object):
 
     def write(self, value, args=()):
         item = self.h5item
+        if isinstance(item, Datatype):
+            return
         maxshape = item.maxshape
         if (args and maxshape and maxshape[0] is None and
                 not any(n is None for n in maxshape[1:])):
