@@ -891,12 +891,13 @@ def _dump_object(item, value):
         # it here.  The recommendation in the python3 docs is to use
         # the _ex version only if __new__ requires keyword arguments.
         # Similarly, we do not support the python2-only __getinitargs__.
+        mydict = getattr(value, "__dict__", None)
         getnew = getattr(value, "__getnewargs__", None)
         setter = hasattr(value, "__setstate__")
         getter = getattr(value, "__getstate__", None)
         if getnew:
             args = getnew()
-        elif not getter:
+        elif not getter and mydict is None:
             # We cannot handle the intricacies of the full
             # pickle/copyreg protocol, but by handling one simple
             # case of __reduce__ we can pick up both slice() and set()
@@ -912,7 +913,7 @@ def _dump_object(item, value):
             subdir = item["__getnewargs__"]
             for i, arg in enumerate(args):
                 subdir["_" + str(i)] = arg
-        value = getter() if getter else getattr(value, "__dict__", None)
+        value = getter() if getter else mydict
         if setter:
             # __setstate__ only called if __getstate__ not false
             # Never convert lists or tuples to ndarrays here.  (??)
@@ -968,7 +969,7 @@ def _load_object(qgroup, cls):
             names = list(name for name in qgroup
                          if name not in ["__class__", "__getnewargs__"])
             if names:
-                obj.__dict__.update(qgroup(names))
+                obj.__dict__.update(qgroup(2, names))
     return obj
 
 
