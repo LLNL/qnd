@@ -1,5 +1,5 @@
-Quick and Dirty Binary Storage Interface
-========================================
+Quick and Dirty: Python Binary Storage Interface
+=================================================
 
 This very simple end-user-friendly API for storing numpy ndarrays in
 binary files is written as a frontend capable of supporting multiple
