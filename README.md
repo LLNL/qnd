@@ -1,5 +1,5 @@
-Quick and Dirty: Python Binary Storage Interface
-=================================================
+Quick and Dirty (QnD): Python Binary Storage Interface
+======================================================
 
 This very simple end-user-friendly API for storing numpy ndarrays in
 binary files is written as a frontend capable of supporting multiple
@@ -34,3 +34,22 @@ qnd is highly pythonic.  As much as possible, qnd file, group, or list
 handles behave like python dicts or lists, with the same operators,
 iterators, and important method names as the workhorse python and
 numpy objects they represent.
+
+
+Authors
+-------
+QnD was created by David H. Munro.
+
+
+License
+-------
+
+QnD is distributed under the terms of the BSD-3 License.
+
+All new contributions must be made under this license.
+
+See LICENSE and NOTICE for details.
+
+SPDX-License-Identifier: BSD-3-Clause
+
+Lawrence Livermore tracking ID: LLNL-CODE-807802
