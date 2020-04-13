@@ -23,6 +23,14 @@ for mod_name in MOCK_MODULES:
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
 sys.path.insert(0, os.path.abspath('../..'))
+# The following is a hack to handle the case that the repo name is not qnd.
+# This happens, for example, at readthedocs.org, which includes version
+# numbers in the top level repo directory name.
+top_level_name = os.path.basename(os.path.abspath(".."))
+if top_level_name != "qnd":
+    import importlib
+    importlib.import_module(top_level_name)
+    sys.modules["qnd"] = sys.modules[top_level_name]
 
 
 # -- Project information -----------------------------------------------------
