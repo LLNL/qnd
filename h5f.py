@@ -76,7 +76,7 @@ def openh5(filename, mode='r', auto=1, **kwargs):
 
 
 class H5Group(object):
-    __slots__ = 'h5item',
+    __slots__ = 'h5item', '__weakref__'
 
     def __init__(self, h5item):
         self.h5item = h5item

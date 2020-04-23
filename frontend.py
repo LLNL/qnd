@@ -1354,7 +1354,7 @@ class QAttributes(ItemsAreAttrs):
         parent, vname = self._qnd_parent, self._qnd_vname
         if vname is None:
             # key is vname
-            item = parent.lookup(key)
+            item = parent.lookup(key) if key else True
             if item is None:
                 raise KeyError("no such item in QGroup as {}".format(key))
             return QAttributes(self, key)
