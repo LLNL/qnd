@@ -169,7 +169,7 @@ def flusher(f, root):
     _dump_group(f, prefix, False, root, blocks)
     f.write(b'\n')
     # Finally comes the extras section.
-    f.write(b'Offset:0\n')  # Default index origin always 0.
+    f.write(b'Offset:1\n')  # Default index origin always 1 to match yorick.
     # Alignment: char, *, short, integer, long, float, double, \n
     f.write(b'Alignment:' + tobytes([1] + aligns[:6]) + b'\n')
     f.write(b'Struct-Alignment:' + _byt(chart.structal) + b'\n')
@@ -264,7 +264,8 @@ def _dump_group(f, prefix, islist, group, blocks):
             shape = (1,) + (shape or ())
         if shape:
             size = prod(shape)
-            shape = b'\x01'.join(b'0\x01' + _byt(s)
+            # Set all index origins to 1 to match yorick.
+            shape = b'\x01'.join(b'1\x01' + _byt(s)
                                   for s in reversed(shape)) + b'\x01'
         else:
             size = 1
