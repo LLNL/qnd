@@ -71,10 +71,14 @@ def initializer(f, root):
         f = handle.open(ifile)
         # Write wrong chart and symtab addresses, fixed by flusher later.
         f.write(header)
+        handle.declared(0, None, len(header))
         # Then write out all the non-record variables we read from file 0.
         addr0 = handle.zero_address()
         for item, value in nrvars:
-            item.shifted_copy(addr0).write(value)
+            item = item.shifted_copy(addr0)
+            stype, shape, addr = item.tsa
+            handle.declared(addr, stype[1], prod(shape) if shape else 1)
+            item.write(value)
         return
     # Initializing first file of family, so we need to initialize chart.
     order, structal = chart.byteorder, chart.structal
@@ -121,7 +125,8 @@ def initializer(f, root):
 
 
 def _iter_nonrec(root):
-    for item in root:
+    for name in root:
+        item = root.items[name]
         if item.isleaf():
             yield item
         elif item.isgroup() and '__class__' not in item:
@@ -132,6 +137,7 @@ def _iter_nonrec(root):
 def flusher(f, root):
     handle, chart = root.handle, root.chart
     _, chart_addr = handle.next_address(both=1)
+    blockadds = handle.zero_address(), chart_addr
     f.seek(chart_addr)
     # Begin by writing just * short integer long float double char to chart,
     # reserving any additional primitives to the PrimitiveTypes extra.
@@ -166,7 +172,7 @@ def flusher(f, root):
             prefix = b'/'
             break
     blocks = []
-    _dump_group(f, prefix, False, root, blocks)
+    _dump_group(f, prefix, False, root, blockadds, blocks)
     f.write(b'\n')
     # Finally comes the extras section.
     f.write(b'Offset:1\n')  # Default index origin always 1 to match yorick.
@@ -236,7 +242,7 @@ def flusher(f, root):
         f.write(_byt(chart_addr) + b'\x01' + _byt(symtab_addr) + b'\x01\n')
 
 
-def _dump_group(f, prefix, islist, group, blocks):
+def _dump_group(f, prefix, islist, group, blockadds, blocks):
     # First dump the group itself as a bogus Directory object.
     ignore_first = False
     if islist:
@@ -255,7 +261,7 @@ def _dump_group(f, prefix, islist, group, blocks):
         name = prefix + (name if PY2 else name.encode('utf8'))
         if item.isgroup() or islist == 2:
             # dump subdirectory
-            _dump_group(f, name + b'/', islist, item, blocks)
+            _dump_group(f, name + b'/', islist, item, blockadds, blocks)
             continue
         # dump leaf (including block variables)
         typename, shape, addr = (item.parent() if islist else item).tsa
@@ -271,8 +277,14 @@ def _dump_group(f, prefix, islist, group, blocks):
             size = 1
             shape = b''
         if islist:
-            blocks.append((name, addr, size, len(item)))
-            addr = addr[0]
+            a = []
+            amin, amax = blockadds
+            for ad in addr:
+                ad -= amin
+                if ad >= 0 and ad < amax:
+                    a.append(ad)
+            blocks.append((name, a, size, len(a)))
+            addr = a[0]
         f.write(name + b'\x01' + typename + b'\x01' + _byt(size) +
                 b'\x01' + _byt(addr) + b'\x01' + shape + b'\n')
 
