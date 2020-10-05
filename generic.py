@@ -4,6 +4,7 @@
 from __future__ import absolute_import
 
 from os.path import expanduser, expandvars, abspath, exists, commonprefix
+from os.path import getsize
 from itertools import count as itertools_count
 import glob
 import re
@@ -34,15 +35,13 @@ def opener(filename, mode, **kwargs):
        One of 'r' (default, read-only), 'r+' (read-write, must exist),
        'a' (read-write, create if does not exist), 'w' (create, clobber if
        exists), 'w-' (create, fail if exists).
-    auto : int
-       The intial state of auto-read mode.  If the QGroup handle returned
-       by openh5 is `f`, then ``f.varname`` reads an array variable, but not
-       a subgroup when auto=1, the default.  With auto=0, the variable
-       reference reads neither (permitting later partial reads in the case
-       of array variables).  With auto=2, a variable reference recursively
-       reads subgroups, bringing a whole tree into memory.
     **kwargs
-       Other keywords.
+       Other keywords.  This opener consumes one item from kwargs:
+    nextaddr_mode : int
+       Affects setting of nextaddr for families opened with 'a' or 'r+'
+       mode.  0 (default) sets nextaddr to the end of the final existing file,
+       1 sets nextaddr to 0 (beginning of first file), and 2 sets nextaddr
+       to the beginning of the next file after all existing files.
 
     Returns
     -------
@@ -154,7 +153,7 @@ def opener(filename, mode, **kwargs):
                 if existing:
                     if all(f.isdigit() for f in existing):
                         # existing matches are all decimal numbers
-                        nums = map(int, existing)
+                        nums = list(map(int, existing))
                         fmt = '{' + ':0{}d'.format(len(existing[0])) + '}'
                         if all(f == fmt.format(n)
                                for f, n in zip(existing, nums)):
@@ -192,7 +191,7 @@ def opener(filename, mode, **kwargs):
         existing = [f[n:m] for f in existing]
         future = iter([f[n:m] for f in filename[len(existing):]])
         pattern = prefix + '{}' + suffix
-    return MultiFile(pattern, existing, future, mode), len(existing)
+    return MultiFile(pattern, existing, future, mode, **kwargs), len(existing)
 
 
 def _expand_ranges(pat):
@@ -224,20 +223,33 @@ class MultiFile(object):
     # which 42 becomes int32.  We also explicitly convert
     abits = int64(42)
 
-    def __init__(self, pattern, existing, future, mode):
+    def __init__(self, pattern, existing, future, mode, **kwargs):
         newfile = not existing
+        nextaddr = int64(0)  # Definite type important on Windows.
+        nextaddr_mode = (kwargs.pop('nextaddr_mode', 0)
+                         if mode.startswith('r+') else 0)
         if newfile:
             try:
                 existing = [next(future)]
-            except StopIteration:
+            except (StopIteration, TypeError):  # TypeError if future is None
                 raise IOError("filename specified no filename?")
-        elif not isinstance(existing, list):
-            existing = list(existing)
+        else:
+            if not isinstance(existing, list):
+                existing = list(existing)
+            if nextaddr_mode == 0:
+                # In a or r+ mode, should begin with a guess at nextaddr,
+                # which is the end of the last existing file.
+                # This may be modified by the non-generic caller (see pdbf).
+                i = len(existing) - 1
+                nextaddr = int64(getsize(pattern.format(existing[i])))
+                nextaddr |= int64(i) << self.abits
+            elif nextaddr_mode == 2:
+                nextaddr = int64(i) << self.abits
         current = 0
         self.f = open(pattern.format(existing[current]), mode)
         self.state = [mode, pattern, existing, current, future]
         self._callbacks = None, Ellipsis if newfile else None
-        self.nextaddr = int64(0)  # Definite type important on Windows.
+        self.nextaddr = nextaddr
 
     def callbacks(self, flusher, initializer):
         """set callback function that flushes file metadata"""
@@ -273,9 +285,11 @@ class MultiFile(object):
         elif not writeable:
             raise IOError("cannot create new file in read-only family")
         else:
-            member = next(future)
             # Do not catch StopIteration here.  Instead handle in caller
             # of next_address(newfile=1).
+            if future is None:
+                raise StopIteration
+            member = next(future)
             if not mode.startswith('w'):
                 mode = 'w+b'
         if isnew:
@@ -308,6 +322,8 @@ class MultiFile(object):
             flusher = self._callbacks[0]
             if flusher is not None:
                 i, nextaddr = self.split_address(self.nextaddr)
+                if nextaddr == 0 and i == current + 1:
+                    return  # handle special case nextaddr_mode==2
                 if i != current:
                     raise AssertionError("(BUG) impossible current file value")
                 f = self.f
@@ -367,12 +383,14 @@ class MultiFile(object):
 
     def next_address(self, both=False, newfile=False):
         """next unused multi-file address, or None if newfile cannot create"""
-        if newfile:
+        # Use special value of nextaddr as implicit newfile flag.
+        nfiles = len(self.state[2])
+        if newfile or self.nextaddr == int64(nfiles) << self.abits:
             try:
-                self.open(len(self.state[2]))
+                self.open(nfiles)
             except StopIteration:
                 # Signal caller that we have run out of filenames.
-                return None
+                return (None, None) if both else None
         nextaddr = int64(self.nextaddr)
         if both:
             one = int64(1)

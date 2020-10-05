@@ -615,6 +615,7 @@ def parser(handle, root, index=0):
         # structure chart -- effectively symtab just gives length of chart.
         raise IOError("PDB file chart must precede symtab")
     f.seek(chart)
+    handle.declared(handle.zero_address() | int64(chart), None, 0)
     chart_contents = f.read(symtab - chart)  # "chart" is PDB type table
     symtab_contents = f.read()
     if version == 3:

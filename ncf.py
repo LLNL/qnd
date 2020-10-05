@@ -7,7 +7,7 @@ from collections import OrderedDict
 from warnings import warn
 
 from numpy import (dtype, prod, fromfile, asarray, array, zeros, concatenate,
-                   ascontiguousarray)
+                   ascontiguousarray, int64)
 from numpy.core.defchararray import decode as npdecode, encode as npencode
 
 from .frontend import QGroup
@@ -75,6 +75,11 @@ def opennc(filename, mode='r', auto=1, **kwargs):
        and true, causes new files to be created using the 64-bit netCDF
        format; the default is to create 32-bit files.  (But a file family
        always uses a single format.)
+       The nextaddr_mode keyword can be used to indicate whether the next
+       new record in 'a' or 'r+' mode should go into a new file.  The
+       default behavior is that it should, which is the pdbf module default;
+       this is nextaddr_mode true.  Use nextaddr_mode=0 to continue filling
+       the final existing file until maxsize.
 
     Returns
     -------
@@ -100,6 +105,12 @@ def opennc(filename, mode='r', auto=1, **kwargs):
     """
     maxsize = kwargs.pop('maxsize', 134217728)
     v64 = kwargs.pop('v64', False)
+    mode = mode.lower()
+    if mode.startswith('a') or mode.startswith('r+'):
+        nextaddr_mode = kwargs.pop('nextaddr_mode', 2) or 1
+    else:
+        nextaddr_mode = 1
+    kwargs['nexaddr_mode'] = nextaddr_mode
     handle, n = opener(filename, mode, **kwargs)
     root = NCGroup(handle, maxsize, v64)
     for i in range(n):
@@ -426,13 +437,19 @@ class NCGroup(object):
         # an integer, this apparently can never cause a problem here.
         ifile = (rec0 - 0.5).searchsorted(irec)
         if ifile >= rec0.size:
+            maxsize = self.maxsize
+            if handle.nextaddr:
+                # Handle special case of the first record written after a
+                # family is opened in 'a' or 'r+' mode.
+                maxsize = 0
             # This is a new record.  We check if maxsize has been exceeded,
             # and force a new file in the family to be created if so.
             n = nrecs[-1]
-            if n and self.recaddr + recsize*n >= self.maxsize:
+            if n and self.recaddr + recsize*n >= maxsize:
                 f = handle.open(ifile)  # implicit flush during open
                 nrecs.append(0)
                 self.initializer(f)
+            handle.nextaddr = int64(0)  # special case only triggers once
             irec -= rec0[-1]
             nrecs[-1] += 1
         elif ifile:

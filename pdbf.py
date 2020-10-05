@@ -95,6 +95,7 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
         if order not in '<>':
             raise ValueError("order must be either > or <")
         order = 1 if order == '>' else 2
+    kwargs['nextaddr_mode'] = 1  # tell opener to initialize nextaddr to 0
     handle, n = opener(filename, mode, **kwargs)
     root = PDBGroup(handle, maxsize)
     for i in range(n):
@@ -112,7 +113,29 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
         root.chart.byteorder = order
     # If file was freshly created, setting initializer calls it.
     handle.callbacks(flusher_for(root), initializer_for(root))
+    # If any files exist, parser has set nexaddr to the chart address
+    # of the last existing file in the family.  If there are no record
+    # variables, we let this stand.  However, if there are record variables,
+    # and the family is writable, we set nextaddr to the zero address of
+    # the next file beyond all existing files.  This causes any new records
+    # to be placed in a new file, leaving all existing files in the
+    # family undisturbed.
+    mode = mode.lower()
+    if ((mode.startswith('a') or mode.startswith('r+')) and
+        handle.state[4] is not None and _has_records(root)):
+            handle.declared(handle.zero_address(len(handle.state[2])), None, 0)
     return QGroup(root, auto=auto)
+
+
+def _has_records(root):
+    for name in root:
+        item = root.items[name]
+        if item.islist() == 1:
+            return True
+        # Recurse into groups, but not into lists or objects of any type.
+        if item.isgroup() and '__class__' not in item and _has_records(item):
+            return True
+    return False
 
 
 class PDBGroup(object):
@@ -349,13 +372,15 @@ class PDBLeaf(object):
                 # TODO: Should prevent partial writes here?
                 selfaddr = addr
                 addr, faddr = handle.next_address(both=1)
+                if addr is None:
+                    pass  # TODO: issue warning here and below?
                 if faddr >= root.maxsize and arg0 >= root.maxblocks:
                     a = handle.next_address(newfile=1)
                     if a is not None:
                         addr = a  # Next file in family has been created.
                     else:
                         # No next filename, and current file exceeds maxsize.
-                        pass  # TODO: issue warning here?
+                        pass  # TODO: issue warning here and above?
                 addr = _align(addr, align)
                 selfaddr.append(addr)
                 handle.declared(addr, stype, prod(shape) if shape else 1)
@@ -394,7 +419,7 @@ class PDBLeaf(object):
         if isinstance(addr, list):
             raise TypeError("cannot make shifted copy of record variable")
         parent = self.parent()
-        if array(addr, 'u8') >> parent.root().handle.abits:
+        if array(addr, 'u8') >> array(parent.root().handle.abits, 'u8'):
             raise TypeError("expecting non-record vars to be in first file")
         return PDBLeaf(self.parent(), addr+delta, dtype, shape, 0)
 
