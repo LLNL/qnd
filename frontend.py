@@ -424,10 +424,10 @@ class QGroup(ItemsAreAttrs):
             else:
                 i = 0
             record = records[min(i, n-1)]
-        elif record is not None:
-            record = int(record)
         elif record is _NOT_PRESENT_:
             return self._qnd_state.goto
+        elif record is not None:
+            record = int(record)
         self._qnd_state.goto = record
 
     def _qnd_goto_recs(self, name):
