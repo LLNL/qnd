@@ -40,6 +40,13 @@ Contents
    pdbparse
    utils
 
+.. toctree::
+  :caption: Example
+
+  examples/example_write_h5
+  examples/example_write_pdb
+  examples/example_read
+
 Indices and tables
 ==================
 
