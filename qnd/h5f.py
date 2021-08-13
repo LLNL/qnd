@@ -129,7 +129,7 @@ class H5Group(object):
         if dtype == dict:
             return H5Group(h5item.create_group(name))
         if dtype == list:
-            return QnDList(h5item.create_group(name), 1)
+            return QnDList(H5Group(h5item.create_group(name)), 1)
         if dtype is None or (shape and not all(shape)):
             h5item[name] = npdtype('u1') if dtype is None else dtype
             item = h5item[name]

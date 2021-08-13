@@ -245,7 +245,14 @@ import sys
 from weakref import proxy, ProxyTypes
 from importlib import import_module
 import re
+# Major change in array(x) function semantics when x is a (nested) list of
+# ragged arrays:  This now generates a DeprecationWarning.  When this
+# functionality disappears, the _categorize function will be broken and
+# need to be repaired for QnD to correctly handle lists of arrays of varying
+# shape.  See the comment marked DHM below.
+from warnings import catch_warnings, simplefilter
 
+from numpy import VisibleDeprecationWarning
 from numpy import (dtype, asfarray, asanyarray, arange, interp, where, prod,
                    ndarray)
 from numpy.core.defchararray import encode as npencode, decode as npdecode
@@ -819,8 +826,18 @@ def _categorize(value, attrib=False):
         else:
             shape, value = value[1:]
     else:
+        # DHM - problem starting with numpy 1.19
+        # This asanyarray call now generates a DeprecationWarning.  When this
+        # functionality disappears, the _categorize function will be broken
+        # and need to be repaired for QnD to correctly handle lists of arrays
+        # of varying shape.  This is actually quite painful, requiring a rather
+        # complex recursive search in the except clause below to re-parse the
+        # value to see if it is a nested list of arrays.  For now we just turn
+        # off the warning message.
         try:
-            v = asanyarray(value)
+            with catch_warnings():
+                simplefilter("ignore", VisibleDeprecationWarning)
+                v = asanyarray(value)
         except Exception:
             dtype, shape = object, None
         else:
@@ -1467,7 +1484,7 @@ class QnDList(object):
             return None  # out of range, let caller raise any exception
         parent = self._qnd_parent
         if parent.isgroup():
-            return parent.lookup("_" + str(nrecs))
+            return parent.lookup("_" + str(ndx))
         return QnDList(self, ndx)
 
     def declare(self, dtype, shape):
