@@ -245,11 +245,10 @@ import sys
 from weakref import proxy, ProxyTypes
 from importlib import import_module
 import re
-# Major change in array(x) function semantics when x is a (nested) list of
-# ragged arrays:  This now generates a DeprecationWarning.  When this
-# functionality disappears, the _categorize function will be broken and
-# need to be repaired for QnD to correctly handle lists of arrays of varying
-# shape.  See the comment marked DHM below.
+# Major change in array(x) function semantics when x is a list of ragged
+# arrays:  This now generates a DeprecationWarning as of 1.19, and
+# presumably an exception for some future numpy (beyond 1.21).  See the
+# _categorize function below for the workaround.
 from warnings import catch_warnings, simplefilter
 
 from numpy import VisibleDeprecationWarning
@@ -826,29 +825,56 @@ def _categorize(value, attrib=False):
         else:
             shape, value = value[1:]
     else:
-        # DHM - problem starting with numpy 1.19
-        # This asanyarray call now generates a DeprecationWarning.  When this
-        # functionality disappears, the _categorize function will be broken
-        # and need to be repaired for QnD to correctly handle lists of arrays
-        # of varying shape.  This is actually quite painful, requiring a rather
-        # complex recursive search in the except clause below to re-parse the
-        # value to see if it is a nested list of arrays.  For now we just turn
-        # off the warning message.
-        try:
-            with catch_warnings():
-                simplefilter("ignore", VisibleDeprecationWarning)
+        # The array(a) constructor used to accept essentially any argument a.
+        # At numpy 1.19 it began issues a VisibleDeprecationWarning when a
+        # was a list whose items were of differing lengths (or shapes).
+        # Prior to that, it simply produced an ndarray of dtype object whose
+        # items were the python entities in the original list.  This is the
+        # behavior we want in QnD, so we do not want to print a warning.
+        # Moreover, when the feature is eventually removed, this case will
+        # throw a (currently unknown) exception, which we need to avoid.
+        # Passing the dtype=object keyword to the array() constructor
+        # produces the pre-1.19 behavior (as far as I can tell), but of
+        # course we cannot do that here.
+        # The following code must work in three cases: (1) pre-1.19 numpy,
+        # (2) numpy 1.19-1.21 (at least) which print unwanted warnings without
+        # special treatment, and (3) future numpy which throws an error
+        # without the dtype=object keyword.  Since QnD must always run in
+        # all three cases, there is no way to remove the protection against
+        # the deprecation wawrning, even when numpy move past it.
+        with catch_warnings():
+            # Make case 2 (numpy 1.19) behave like case 3 (future numpy)
+            simplefilter("error", VisibleDeprecationWarning)
+            try:
                 v = asanyarray(value)
-        except Exception:
-            dtype, shape = object, None
-        else:
-            dtype, shape = v.dtype, v.shape
-            if dtype.kind == "O":
-                if not shape:
-                    dtype, shape = object, None
-                else:
-                    dtype, shape, value = list, None, v.tolist()
+            except Exception:
+                # As far as I can tell, the original numpy array() constructor
+                # would accept any argument whatsoever, returning either a
+                # scalar or 1D array of type object if its argument could not
+                # be interpreted.  Therefore I believe only a ragged array
+                # argument reaches this point, and we can return to the
+                # original behavior by specifying dtype explicitly.
+                # Nevertheless, we protect against a possible exception.
+                simplefilter("ignore", VisibleDeprecationWarning)
+                try:
+                    v = asanyarray(value, dtype=object)
+                except Exception:
+                    return object, None, value
+        dtype, shape = v.dtype, v.shape
+        if dtype.kind == "O":
+            if not shape:
+                dtype, shape = object, None
             else:
-                value = v
+                # Note that this does not work as expected when the contents
+                # of the list were themselves lists (not ndarrays) of numbers
+                # of varying lengths, since the asanyarray function will not
+                # convert those inner lists to ndarrays.  Hence v.tolist() is
+                # really the same as the original value here.
+                # A QnD user must ensure that the inner lists are ndarrays if
+                # that is what they intended.
+                dtype, shape, value = list, None, v.tolist()
+        else:
+            value = v
     if isinstance(dtype, _dtype):
         kind = dtype.kind
         if kind == "U":
