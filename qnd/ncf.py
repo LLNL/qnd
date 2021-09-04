@@ -18,7 +18,7 @@ __all__ = ['opennc']
 
 PY2 = sys.version_info < (3,)
 if PY2:
-    range = xrange
+    range = xrange  # noqa
 
     def itemsof(d): return d.iteritems()  # noqa
 else:
@@ -51,6 +51,34 @@ def opennc(filename, mode='r', auto=1, **kwargs):
     finish a netCDF-3 file.  Furthermore, when you overwrite any record
     variable in `recording` mode, ncf will implicitly `flush` the file,
     since no new variables can be declared after that.
+
+    Note that you use the standard QnD API, a copy of every variable
+    you write to the file until you begin the second record will be
+    kept in memory, which could potentially be a problem.  If you wish
+    to declare all variables before writing anything, so that your
+    code is aligned with the netCDF API, do something like this::
+
+       f = opennc("myfile??.nc", "w")  # wildcards expand to 00, 01, 02, ...
+       # declare non-record variables from in-memory arrays
+       f.nrvar1 = nrvar1.dtype, nrvar1.shape
+       f.nrvar2 = nrvar2.dtype, nrvar2.shape
+       # declare record variables from in-memory arrays
+       f.recording(1)
+       f.rvar1 = rvar1.dtype, rvar1.shape
+       f.rvar2 = rvar2.dtype, rvar2.shape
+       # flushing the file is equivalent to netCDF ENDDEF mode switch
+       f.flush()
+       # now write the current values of all the variables
+       f.nrvar1 = nrvar1
+       f.nrvar2 = nrvar2
+       # writing the record variables writes their values for first record
+       f.rvar1 = rvar1
+       f.rvar2 = rvar2
+       # change values of record variables and write the second record
+       f.rvar1 = rvar1
+       f.rvar2 = rvar2
+       # when you've written all records, close the file
+       f.close()
 
     Parameters
     ----------
@@ -124,7 +152,7 @@ def opennc(filename, mode='r', auto=1, **kwargs):
                               "".format(name))
             handle.open(i-1)
             warn("file family stopped by incompatible {}".format(name))
-    handle.callbacks(root.flusher, root.initializer)
+    handle.callbacks(root.flusher, root.initializer)  # may call initializer
     return QGroup(root, auto=auto)
 
 
@@ -238,8 +266,9 @@ def ncparse(handle, root, ifile):
             raise IOError("bad dimension index in netCDF-3 header")
         shape = tuple(dims[i][1] for i in shape)
         item = NCLeaf(root, len(variables), offset, stype, shape, sshape)
-        variables[name] = NCList(root, item) if unlim else item
+        variables[name] = itemx = NCList(root, item) if unlim else item
         if unlim:
+            itemx.count += nrecs
             nrecvar += 1
             if nrecvar == 1:
                 nbytes = stype.itemsize
@@ -340,7 +369,7 @@ def _get_attrs(f):
 class NCGroup(object):
     def __init__(self, handle, maxsize=134217728, v64=False):
         self.handle = handle  # a generic.MultiFile
-        self.variables = self.dims = self.attrs = None
+        self.variables, self.dims, self.attrs = {}, {}, {}
         self.headsize = self.recaddr = self.recsize = 0
         self.nrecs = []  # list of record counts in files of family
         self.maxsize = maxsize
@@ -381,7 +410,7 @@ class NCGroup(object):
         if shape and not all(shape):
             raise TypeError("netCDF does not support 0-length dimensions")
         stype = _get_stype(dtype)
-        sshape = tuple('_' + str(s) for s in shape) if shape else None
+        sshape = tuple('_' + str(s) for s in shape) if shape else ()
         dims, variables = self.dims, self.variables
         if unlim:
             dims.setdefault('_0', 0)
@@ -430,14 +459,28 @@ class NCGroup(object):
 
     def record_delta(self, irec):
         """Compute delta to add to record variable offset to reach irec."""
-        handle, nrecs, recsize = self.handle, self.nrecs, self.recsize
+        handle, nrecs, maxsize = self.handle, self.nrecs, self.maxsize
+        if not self.headsize:
+            if not nrecs:  # This is first record variable.
+                nrecs.append(1)
+            if not irec:
+                return 0  # First record is being declared, delta unknown.
+            # Beginning to write second record may force first flush,
+            # freezing the netCDF file structure, an implicit ENDDEF.
+            # Effectively, this flush is writing the first record, even
+            # though this call has irec==1 and declaring the first variable
+            # of the second record.
+            self.flusher(self.handle.open(0))
+        recsize = self.recsize
         rec0 = array(nrecs).cumsum()
         # searchsorted needs strictly monotonic array
         # However, because of the 0.5 offset and the fact that irec is
-        # an integer, this apparently can never cause a problem here.
+        # an integer, this apparently can never cause a problem here
+        # (the monotonicity problem only arises if irec matches two
+        # consecutive equal values of rec0-0.5, which could happen if
+        # some file has no records).
         ifile = (rec0 - 0.5).searchsorted(irec)
         if ifile >= rec0.size:
-            maxsize = self.maxsize
             if handle.nextaddr:
                 # Handle special case of the first record written after a
                 # family is opened in 'a' or 'r+' mode.
@@ -445,18 +488,28 @@ class NCGroup(object):
             # This is a new record.  We check if maxsize has been exceeded,
             # and force a new file in the family to be created if so.
             n = nrecs[-1]
-            if n and self.recaddr + recsize*n >= maxsize:
+            if n and (self.recaddr + recsize*n >= maxsize):
                 f = handle.open(ifile)  # implicit flush during open
                 nrecs.append(0)
                 self.initializer(f)
+                irec -= rec0[-1]
+            else:
+                ifile -= 1  # add record to last existing file
+                if ifile:
+                    irec -= rec0[ifile - 1]
             handle.nextaddr = int64(0)  # special case only triggers once
-            irec -= rec0[-1]
             nrecs[-1] += 1
         elif ifile:
             irec -= rec0[ifile - 1]
         return handle.zero_address(ifile) + recsize * irec
 
     def flusher(self, f):
+        # The flush method has to serve as ENDDEF for newly created netCDF
+        # families, see comments for initializer method below.
+        if not self.headsize:
+            # Only get here for first file of newly created family.
+            self.headsize = 1  # impossible since magic number is 4 bytes
+            self.initializer(f)
         # The only metadata that may need to be written is nrecs.
         # The file handle f is the last file in the family.
         if self.nrecs:
@@ -464,6 +517,19 @@ class NCGroup(object):
             array(self.nrecs[-1], '>i4').tofile(f)
 
     def initializer(self, f):
+        # Called indirectly by handle.callbacks during ncopen in "w" mode.
+        # This is the only case in which this point is reachable with zero
+        # self.headsize, because ncparse would have filled it in in "r" or
+        # "r+" mode, and it would have been written for the first file in
+        # the family if this is not the first file.
+        # For the first file of a newly created netCDF family, we want to
+        # wait for an explicit call to flush() to write the first file header,
+        # which is the QnD implementation of the ENDDEF call in the netCDF API.
+        first_flush = self.headsize == 1  # impossible value set in flusher
+        if first_flush:
+            self.headsize = 0
+        else:
+            return
         # The file f positioned at address 0.
         i4be = _netcdf_stypes[3]
         v64 = self.v64
@@ -496,20 +562,25 @@ class NCGroup(object):
         else:
             array((11, len(variables)), i4be).tofile(f)
         headsize = f.tell()  # including vars tag and count
-        if not self.headsize:
+        if first_flush:
             # The offsets in the variables array are unknown until the
             # symbol table is written, which makes it hard to write for
             # the first file in a family.  We make a clumsy two passes
             # to compute the length of the var_list if the offsets have
             # not yet been set.
             # add space for name length, ndim, nctype, vsize, and offset
-            headsize += (20 + 4*v64) + len(variables)
+            headsize += (20 + 4*v64) * len(variables)
+            nrecs = self.nrecs
             for name, item in itemsof(variables):
-                if isinstance(item, NCList):
+                unlim = isinstance(item, NCList)
+                if unlim:
                     item = item.leaf
-                ndim = len(item.shape or ())  # so shape None okay
+                    if not nrecs:
+                        nrecs.append(0)
+                ndim = len(item.shape or ()) + unlim  # so shape None okay
                 vattrs = attrs.get(name)
-                headsize += 4*ndim + _measure_attrs(vattrs)
+                namelen = _put_name(None, name)
+                headsize += namelen + 4*ndim + _measure_attrs(vattrs)
             offset = self.headsize = headsize
             # Now we can fill in all the offsets and find recaddr.
             recitems = []
@@ -518,6 +589,7 @@ class NCGroup(object):
                     item = item.leaf
                 if item.offset:  # This is unlim, see NCGroup.declare.
                     recitems.append(item)
+                    continue
                 item.offset = offset
                 offset += _measure_item(item)
             self.recaddr = offset
@@ -533,7 +605,7 @@ class NCGroup(object):
                 recid = i
                 break
         recid = [] if recid is None else [recid]
-        iobe = dtype('>i8') if self.v64 else i4be
+        iobe = dtype('>i8') if v64 else i4be
         rem = recsize & 3
         if rem:
             recsize += 4 - rem  # used only for vsize
@@ -550,13 +622,13 @@ class NCGroup(object):
             array(len(sshape) + unlim, i4be).tofile(f)
             sshape = (recid if unlim else []) + [dimids[s] for s in sshape]
             array(sshape, i4be).tofile(f)
-            _put_attrs(attrs.get(name))
+            _put_attrs(f, attrs.get(name))
             vsize = recsize if unlim else _measure_item(item)
             array([nctype, vsize], i4be).tofile(f)
             array(offset, iobe).tofile(f)
         headsize = f.tell()
         if headsize != self.headsize:
-            IOError("netCDF header size mismatch (BUG?)")
+            raise IOError("netCDF header size mismatch (BUG?)")
         # Header finished, write any pending variables now.
         pending = self.pending
         self.pending = None
@@ -574,10 +646,14 @@ def _put_name(f, name):
     name = _text_as_bytes(name)
     nchar = len(name)
     rem = nchar & 3
+    if f is None:
+        rem = (4 - rem) if rem else 0
+        return nchar + rem  # not including 4 byte nchar count
     if rem:
         name = name + b'\0'*(4 - rem)
     array(nchar, _netcdf_stypes[3]).tofile(f)
     f.write(name)
+    return None
 
 
 def _put_attrs(f, attrs):
@@ -638,7 +714,9 @@ def _measure_item(item):
 
 
 def _get_stype(dtype):
-    kind = 'X' if dtype in (dict, list, None) else dtype.kind
+    # bewawre misfeature numpy (1.16.4) dtype('f8') tests == None
+    kind = 'X' if dtype is None or dtype in (dict, list,
+                                             object) else dtype.kind
     stype = None
     if kind in 'bui':
         size = dtype.itemsize
@@ -700,9 +778,13 @@ class NCLeaf(object):
         return self._dtype(), shape, sshape if sshape else shape
 
     def read(self, args=()):
+        parent = self.parent()
+        if not parent.headsize:
+            raise RuntimeError("cannot read from netCDF file in 'w' mode"
+                               " before first flush")
         stype, shape = self.stype, self.shape
         args, shape, offset = leading_args(args, shape)
-        f = self.parent().handle.seek(self.offset + stype.itemsize * offset)
+        f = parent.handle.seek(self.offset + stype.itemsize * offset)
         size = prod(shape) if shape else 1
         value = fromfile(f, stype, size).reshape(shape)[args]
         if not stype.isnative:
@@ -772,11 +854,12 @@ class NCLeaf(object):
 
 class NCList(object):
     """NCLeaf wrapper for record variables."""
-    __slots__ = 'parent', 'leaf'
+    __slots__ = 'parent', 'leaf', 'count'
 
     def __init__(self, parent, leaf):
         self.parent = weakref.ref(parent)
         self.leaf = leaf
+        self.count = 0  # record count needed to know when new record created
 
     @staticmethod
     def islist():
@@ -811,7 +894,9 @@ class NCList(object):
         return self.leaf.shift_by(delta)
 
     def declare(self, dtype, shape):
-        parent = self._qnd_parent
-        nrecs = len(self)
-        delta = parent.record_delta(nrecs)
+        # Ignore dtype and shape here; conformability with the NCLeaf
+        # dtype and shape will be enforced during NCLeaf.write.
+        parent = self.parent()
+        delta = parent.record_delta(self.count)
+        self.count += 1  # nrecs in NCGroup incremented in record_delta
         return self.leaf.shift_by(delta)
