@@ -78,12 +78,12 @@ The bottom line is, you use a qnd file handle `f` as if it were a
 python dict, but you are also free to treat items in `f` as if they
 were attributes of this dict object::
 
-  x = f.x  # read variable "x" from f, same as f['x']
+  x = f.x           # read variable "x" from f, same as f['x']
   f.x = expression  # declare and write "x" to f
-  f.update(x=expr1, y=expr2, ...)  # declare ad write several variables
+  f.update(x=expr1, y=expr2, ...)  # declare and write several variables
   # update also accepts non-keyword dicts and lists of (name, value)
   x = f.get('x', xdefault)  # same as get from dict
-  varnames = list(f)  # preferred over f.keys(), as for any dict
+  varnames = list(f)        # preferred over f.keys(), as for any dict
   nvars = len(f)
   if name in f: do_something
   for name in f: do_something
@@ -96,9 +96,9 @@ qnd files also have a number of non-dict methods and behaviors::
   f.flush()  # like close then reopen
   with openh5('myfile.h5', 'a') as f:
       write_something(f)  # closing f upon exit from with suite
-  f.auto(0)  # turn off (or on) auto-read mode
-  f.recording(1)  # turn on (or off) recording mode
-  f.goto(time=t)  # set to previously recorded record
+  f.auto(0)        # turn off (or on) auto-read mode
+  f.recording(1)   # turn on (or off) recording mode
+  f.goto(time=t)   # set to previously recorded record
   with f.push():
       do_something(f)  # temporarily change auto, recording, goto state
 
