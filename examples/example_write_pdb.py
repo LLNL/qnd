@@ -1,6 +1,7 @@
 '''
 example_write_pdb.py demos how to write single values and multiple records 
-into a family of pdb files
+into a family of pdb files.
+It writes to the current directory, so run it from one where you have permission to write.
 '''
 import numpy as np
 from qnd.pdbf import openpdb
