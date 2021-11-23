@@ -1,6 +1,7 @@
 '''
 example_write_h5.py demos how to write single values and multiple records 
-into an hdf5 file
+into an hdf5 file.
+It writes to the current directory, so run it from one where you have permission to write.
 '''
 import numpy as np
 from qnd.h5f import openh5
