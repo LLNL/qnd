@@ -158,6 +158,9 @@ class PDBChart(object):
         else:
             fields = dtype.fields
             names = dtype.names
+            n = self.nanons
+            self.nanons += 1
+            name = '_anon_{}'.format(n).encode('latin1')
         if not names:
             order = self.byteorder
             if not order:
@@ -194,10 +197,8 @@ class PDBChart(object):
                 if al > align:
                     align = al
                 desc[nm.encode('latin1')] = typename, shape
+            desc = size, desc
             adder = self.add_struct
-        n = self.nanons
-        self.nanons += 1
-        name = '_anon_{}'.format(n).encode('latin1')
         stype = adder(name, desc)
         return stype, align, name
 
