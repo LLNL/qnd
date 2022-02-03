@@ -156,12 +156,12 @@ def flusher(f, root):
     for name, struct in itemsof(structs):
         size = struct[0].itemsize
         f.write(name + b'\x01' + _byt(size) + b'\x01')
-        for tname, shape in itemsof(struct[3]):
+        for mname, (tname, shape) in itemsof(struct[3]):
             if shape:
                 shape = b'[' + b','.join(_byt(s) for s in shape) + b']'
             else:
                 shape = b''
-            f.write(tname + b' ' + name + shape + b'\x01')
+            f.write(tname + b' ' + mname + shape + b'\x01')
         f.write(b'\n')
     f.write(b'\x02\n')
     # Next comes the symbol table.
