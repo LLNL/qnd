@@ -11,10 +11,13 @@ QnD package
 ===========
 
 The qnd module (quick and dirty) provides a frontend for reading and
-writing self-describing binary files.  Backends exist for HDF5 and PDB
-file formats (the former via h5py, the latter via pure python code).
-Adding backends is not very difficult; the interface is well-defined
-and relatively small.
+writing self-describing binary files.  Backends exist for HDF5 (via h5py),
+netCDF3, and PDB (via pure python code contained in QnD) file formats.
+netCDF4 is not specifically supported, but since it's based on HDF5 
+such files can be treated as HDF5.  Adding backends is not very difficult; 
+the interface is well-defined and relatively small.
+
+QnD is free and open-source, and hosted on `LLNL's public github <https://github.com/LLNL/qnd/>`_.
 
 This manual describes the design philosophy behind this user interface;
 in a nutshell, the idea is to keep things as simple as possible, but
