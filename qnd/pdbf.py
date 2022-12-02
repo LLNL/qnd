@@ -1,6 +1,9 @@
 """Pure python QnD wrapper for PDB files.
 
-PDB metadata description at https://wci.llnl.gov/codes/pact/pdb.html#pdb_fmt .
+Information on the PDB file format is somewhat hard to come by.  
+Try the SILO github repo https://github.com/LLNL/Silo
+esp. src/pdb/ and src/score/ dirs.
+Also the end of the QND file pdbparse.py has a long comment with a detailed description.
 
 Note that yorick-generated PDB files are version II, not version III.  Also,
 yorick pointers are written (by default) in a yorick-specific format.  Since
