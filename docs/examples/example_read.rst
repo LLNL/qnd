@@ -20,7 +20,7 @@ This script reads the contents of both ``example_write*.py`` scripts
   y: [0.1, 0.2, 0.3]
   z: [array([0, 1, 2]), array([1, 2, 3]), array([2, 3, 4])]
 
-It is located at ``$IDREP/qnd/examples/example_read.py``.
+It is located at ``[QND repo]/qnd/examples/example_read.py``.
 
 .. literalinclude:: ../../examples/example_read.py
   :linenos:
