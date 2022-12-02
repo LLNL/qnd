@@ -16,8 +16,6 @@ metadata is text with a few embedded ASCII control characters, written
 at the end of the file, and intended to be parsed and held in memory
 when the file is opened.
 
-https://wci.llnl.gov/codes/pact/pdb.html#pdb_fmt
-
 """
 from __future__ import absolute_import
 
