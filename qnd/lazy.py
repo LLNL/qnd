@@ -57,8 +57,10 @@ def openb(filename, mode="r", auto=1, **kwargs):
     """
     name = filename
     if isinstance(name, basestring):
-        name = list((sorted(glob(expanduser(expandvars(name))),
-                                key=lambda f: (len(f), f))))
+        namex = expanduser(expandvars(name))
+        name = list((sorted(glob(namex), key=lambda f: (len(f), f))))
+        if not name and mode.startswith("w"):
+            name = [namex];
     if not name:
         raise ValueError("no such file(s): {}".format(filename))
     name = name[0]
