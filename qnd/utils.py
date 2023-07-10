@@ -58,7 +58,7 @@ def leading_args(args, shape):
         soffset = 0 if iellipsis is None else ndim - nargs
         if soffset >= -1:
             nremove = 0
-            for i, a in reversed(enumerate(args)):
+            for i, a in reversed(list(enumerate(args))):
                 if i == iellipsis:
                     soffset = 0
                     # Note that if ellipsis is present and not removed,
