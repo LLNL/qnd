@@ -35,6 +35,7 @@ handles behave like python dicts or lists, with the same operators,
 iterators, and important method names as the workhorse python and
 numpy objects they represent.
 
+The QND documentation is available at [https://qnd.readthedocs.io/en/latest/](https://qnd.readthedocs.io/en/latest/)
 
 Authors
 -------
