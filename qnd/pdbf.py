@@ -94,6 +94,8 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
     """
     maxsize = kwargs.pop('maxsize', 134217728)
     order = kwargs.pop('order', None)
+    allrecs = kwargs.pop('allrecs', None)
+    atnames = kwargs.pop('atnames', None)
     if order:
         if order not in '<>':
             raise ValueError("order must be either > or <")
@@ -103,7 +105,7 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
     root = PDBGroup(handle, maxsize)
     for i in range(n):
         try:
-            parser(handle, root, i)
+            parser(handle, root, i, allrecs, atnames)
         except IOError:
             # Something went terribly wrong.  If this is first file, we die.
             name = handle.filename(i)

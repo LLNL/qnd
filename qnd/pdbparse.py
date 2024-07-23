@@ -532,7 +532,7 @@ _complex_members = (('r', 'i'), ('re', 'im'), ('real', 'imag'),
                     ('real', 'imaginary'))
 
 
-def parser(handle, root, index=0):
+def parser(handle, root, index=0, allrecs=None, atnames=None):
     """Parse PDB file with the given MultiFile handle and PDBGroup group."""
     f = handle.open(index)
 
@@ -700,7 +700,7 @@ def parser(handle, root, index=0):
             elif (dundertype and typ == b'__' and name.endswith(b'__@history')
                   and not shape):
                 recordsym = name
-            elif name.count(b'@') == 1:
+            elif name.count(b'@') == 1 and not atnames:
                 bname, pkg = name.split(b'@')
                 if pkg in (b'macro', b'funct'):
                     continue  # skip basis macros or functions
@@ -711,6 +711,8 @@ def parser(handle, root, index=0):
                     name = bname
                 if pkg == b'history':
                     basisrecs.add(name)
+            if allrecs and name not in basisrecs:
+                basisrecs.add(name)
             if not has_dirs:
                 has_dirs |= typ == b'Directory' or name.startswith(b'/')
             # Begin workaround of yorick bug that sometimes forgot to write
