@@ -532,7 +532,7 @@ _complex_members = (('r', 'i'), ('re', 'im'), ('real', 'imag'),
                     ('real', 'imaginary'))
 
 
-def parser(handle, root, index=0, allrecs=None, atnames=None):
+def parser(handle, root, index=0, allrecs=None, atnames=None, hooks=None):
     """Parse PDB file with the given MultiFile handle and PDBGroup group."""
     f = handle.open(index)
 
@@ -617,6 +617,9 @@ def parser(handle, root, index=0, allrecs=None, atnames=None):
     handle.declared(handle.zero_address() | int64(chart), None, 0)
     chart_contents = f.read(symtab - chart)  # "chart" is PDB type table
     symtab_contents = f.read()
+    if getattr(hooks, "pre_parse", None):
+        chart_contents, symtab_contents = hooks.pre_parse(
+            chart_contents, symtab_contents, version)
     if version == 3:
         _parse3(f, root, chart_contents, symtab_contents)
         return

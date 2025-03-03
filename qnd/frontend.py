@@ -251,8 +251,11 @@ import re
 # _categorize function below for the workaround.
 from warnings import catch_warnings, simplefilter
 
-from numpy import VisibleDeprecationWarning
-from numpy import (dtype, asfarray, asanyarray, arange, interp, where, prod,
+try:
+    from numpy import VisibleDeprecationWarning
+except ImportError:
+    VisibleDeprecationWarning = DeprecationWarning
+from numpy import (dtype, asarray, asanyarray, arange, interp, where, prod,
                    ndarray)
 from numpy.core.defchararray import encode as npencode, decode as npdecode
 
@@ -446,7 +449,7 @@ class QGroup(ItemsAreAttrs):
                     self.goto(None)
                     self.auto(2)
                     values = self[name]
-                values = asfarray(values)
+                values = asarray(values, float)
                 if values.ndim != 1 or values.size < 1:
                     values = None
             if values is None:
@@ -842,6 +845,8 @@ def _categorize(value, attrib=False):
         # without the dtype=object keyword.  Since QnD must always run in
         # all three cases, there is no way to remove the protection against
         # the deprecation wawrning, even when numpy move past it.
+        # As a further complication, VisibleDeprecationWaring has been removed
+        # in numpy 2.0.
         with catch_warnings():
             # Make case 2 (numpy 1.19) behave like case 3 (future numpy)
             simplefilter("error", VisibleDeprecationWarning)
