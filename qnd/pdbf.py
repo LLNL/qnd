@@ -43,7 +43,7 @@ if PY2:
     range = xrange
 
 
-def openpdb(filename, mode='r', auto=1, **kwargs):
+def openpdb(filename, mode='r', auto=1, hooks=None, **kwargs):
     """Open PDB file or family, and wrap it in a QnD QGroup.
 
     Parameters
@@ -61,6 +61,12 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
        reference reads neither (permitting later partial reads in the case
        of array variables).  With auto=2, a variable reference recursively
        reads subgroups, bringing a whole tree into memory.
+    hooks : object
+       Methods of this object are called to modify default openpdb behavior.
+       The only hook currently supported is hooks.pre_parse(chart, symtab,
+       version), where version is the PDB version (usually 2), and
+       which should accept the raw byte strings for the chart and symbol
+       table, modify them, and return the modified (char, symtab).
     **kwargs
        Other keywords.  The `maxsize` keyword sets the size of files in a
        family generated in ``recording==1`` mode; a new file will begin when
@@ -105,7 +111,7 @@ def openpdb(filename, mode='r', auto=1, **kwargs):
     root = PDBGroup(handle, maxsize)
     for i in range(n):
         try:
-            parser(handle, root, i, allrecs, atnames)
+            parser(handle, root, i, allrecs, atnames, hooks)
         except IOError:
             # Something went terribly wrong.  If this is first file, we die.
             name = handle.filename(i)
