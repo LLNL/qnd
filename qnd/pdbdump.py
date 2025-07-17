@@ -136,8 +136,14 @@ def _iter_nonrec(root):
 
 def flusher(f, root):
     handle, chart = root.handle, root.chart
-    _, chart_addr = handle.next_address(both=1)
+    nextaddr, chart_addr = handle.next_address(both=1)
     blockadds = handle.zero_address(), chart_addr
+    attributes = None
+    if root.has_attributes:
+        attributes = root._detached_subgroup()  # fake group holds attributes
+        _dump_attributes(root, attributes, "")
+        _, chart_addr = handle.next_address(both=1)
+        handle.nextaddr = nextaddr  # reset nextaddr to clobber attributes
     f.seek(chart_addr)
     # Begin by writing just * short integer long float double char to chart,
     # reserving any additional primitives to the PrimitiveTypes extra.
@@ -166,13 +172,16 @@ def flusher(f, root):
     f.write(b'\x02\n')
     # Next comes the symbol table.
     symtab_addr = f.tell()
+    blocks = []
     prefix = b''
     for name, item in itemsof(root.items):
         if item.isgroup() or item.islist() == 2:
             prefix = b'/'
             break
-    blocks = []
-    _dump_group(f, prefix, False, root, blockadds, blocks)
+    _dump_group(f, prefix, 0, root, blockadds, blocks)
+    if attributes is not None:
+        _dump_group(f, prefix + b':', 0, attributes, None, None)
+        del attributes
     f.write(b'\n')
     # Finally comes the extras section.
     f.write(b'Offset:1\n')  # Default index origin always 1 to match yorick.
@@ -242,13 +251,39 @@ def flusher(f, root):
         f.write(_byt(chart_addr) + b'\x01' + _byt(symtab_addr) + b'\x01\n')
 
 
+def _dump_attributes(group, attributes, prefix):
+    ignore_first = False
+    if group.islist() == 2:
+        group = group.parent()
+        ignore_first = True
+    if group.attrs:
+        for aname, value in itemsof(group.attrs):
+            aname = prefix + ":" + aname
+            attributes._write_attr(aname, value)
+    subgroups = []
+    for name, item in itemsof(group.items):
+        if ignore_first:
+            ignore_first = False;
+            continue
+        name = prefix + name
+        if item.isgroup() or item.islist() == 2:
+            subgroups.append((item, name))
+        elif item.attrs:
+            for aname, value in itemsof(item.attrs):
+                aname = name + ":" + aname
+                attributes._write_attr(aname, value)
+    for item, name in subgroups:
+        _dump_attributes(item, attributes, name + ":")
+    return prefix, attributes
+
+
 def _dump_group(f, prefix, islist, group, blockadds, blocks):
     # First dump the group itself as a bogus Directory object.
     ignore_first = False
     if islist:
         group = group.parent()
         ignore_first = True
-    if prefix:
+    if prefix and (blocks is not None):
         f.write(prefix + b'\x01Directory\x011\x01127\x01\n')
     for name in group:
         if ignore_first:
@@ -272,7 +307,7 @@ def _dump_group(f, prefix, islist, group, blockadds, blocks):
             size = prod(shape)
             # Set all index origins to 1 to match yorick.
             shape = b'\x01'.join(b'1\x01' + _byt(s)
-                                  for s in reversed(shape)) + b'\x01'
+                                 for s in reversed(shape)) + b'\x01'
         else:
             size = 1
             shape = b''

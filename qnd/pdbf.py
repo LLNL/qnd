@@ -29,6 +29,7 @@ from warnings import warn
 
 from numpy import (zeros, arange, fromfile, prod, array, ascontiguousarray,
                    dtype as npdtype)
+from numpy.core.defchararray import encode as npencode, decode as npdecode
 
 from .frontend import QGroup, QnDList
 from .generic import opener
@@ -160,6 +161,7 @@ class PDBGroup(object):
             self.maxblocks = 0
             self.handle = parent
             self.chart = PDBChart(self)
+            self.has_attributes = False
         else:
             self.root = parent.root
         self.items = OrderedDict()
@@ -261,11 +263,30 @@ class PDBGroup(object):
         attrs = item.attrs
         if attrs is None:
             item.attrs = attrs = PDBAttrs()
+            self.root().has_attributes = True
         if value.dtype != dtype or value.shape != shape:
             v = zeros(shape, dtype)
             v[()] = value
             value = v
         attrs[aname] = value
+
+    def _read_attr(self, vname, aname, dtype, shape, addr):  # for pdbparse
+        value = PDBLeaf(self.root(), addr, dtype, shape, None).read()
+        if dtype.kind == "S" and not PY2:
+            try:
+                value = npdecode(value, "utf8")
+            except UnicodeDecodeError:
+                value = npdecode(value, "latin1")
+        self.attset(vname, aname, value.dtype, value.shape, value)
+
+    def _detached_subgroup(self):  # for pdbdump (holds attributes)
+        return PDBGroup(self)
+
+    def _write_attr(self, name, value):  # for pdbdump
+        if value.dtype.kind == "U":
+            value = npencode(value, "utf8")  # convert to 'S'
+        item = self.declare(name, value.dtype, value.shape)
+        item.write(value)
 
 
 class PDBLeaf(object):
