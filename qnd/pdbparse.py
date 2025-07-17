@@ -124,6 +124,8 @@ class PDBChart(object):
         return stype, align, typename, self.nopartial()
 
     def _saveable(self, dtype):
+        if dtype is None:
+            return dtype
         if dtype.shape:
             raise TypeError("cannot store subarray dtype in PDB file")
         if not dtype.isnative:
@@ -135,6 +137,9 @@ class PDBChart(object):
         return dtype
 
     def _add_dtype(self, dtype):
+        if dtype is None:
+            stype = self.add_primitive(b'NoneType', (1, 0, 0))
+            return stype, 0, b'NoneType'
         by_dtype, nonenone = self.by_dtype, (None, None)
         # Need to declare anonymous type now.
         size = dtype.itemsize
@@ -1166,7 +1171,11 @@ def _endparse(root, structal, haspointers, primtypes, structs, symtab, errors,
                 errors.append(
                     "cannot find attribute: {}".format(aname))
                 continue
-            grp._read_attr(vname, name, dtype[0], shape, addr)
+            if name != "0":
+                grp._read_attr(vname, name, dtype[0], shape, addr)
+            elif grp._read_shape(vname, dtype[0], shape, addr):
+                errors.append(
+                    "bad zero-length array indicator: {}".format(aname))
         # Ensure that attributes are overwritten if file is extended:
         handle = root.handle
         handle.declared(handle.zero_address() | int64(attr_address), None, 0)

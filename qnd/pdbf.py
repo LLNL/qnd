@@ -279,6 +279,16 @@ class PDBGroup(object):
                 value = npdecode(value, "latin1")
         self.attset(vname, aname, value.dtype, value.shape, value)
 
+    def _read_shape(self, vname, dtype, shape, addr):  # for pdbparse
+        value = PDBLeaf(self.root(), addr, dtype, shape, None).read()
+        item = self.lookup(vname)
+        if value.dtype.kind!="i" or value.ndim!=1 or all(value) or not item:
+            return True  # signal error
+        tsa = list(item.tsa)
+        tsa[1] = tuple(value.astype(int))  # convert to shape
+        item.tsa = tuple(tsa)
+        return False  # signal success
+
     def _detached_subgroup(self):  # for pdbdump (holds attributes)
         return PDBGroup(self)
 
@@ -296,14 +306,14 @@ class PDBLeaf(object):
 
     """
     def __init__(self, parent, addr, dtype, shape, unlim):
-        if dtype is None or (shape and not all(shape)):
-            raise NotImplementedError("None or zero length array")
         root = parent.root()
         if not isinstance(dtype, tuple):
             # Construct full data type: (dtype, stype, align, typename)
             dtype = (dtype,) + root.chart.find_or_create(dtype)
         self.parent = weakref.ref(parent)
         self.attrs = None
+        if shape and not all(shape):
+            root.has_attributes = True  # pdbdump will write pseudo-attribute
         if hasattr(addr, '__iter__'):
             unlim = 1
             if not isinstance(addr, list):
@@ -345,6 +355,10 @@ class PDBLeaf(object):
     def read(self, args=()):
         dtype, shape, addr = self.tsa
         dtype, stype, _, typename = dtype
+        if typename == b'NoneType':
+            return None
+        if shape and not all(shape):
+            return zeros(shape, dtype)
         istext = typename == b'text'
         if isinstance(addr, list):
             arg0 = args[0] if args else slice(None)
@@ -383,6 +397,17 @@ class PDBLeaf(object):
     def write(self, value, args=()):
         dtype, shape, addr = self.tsa
         dtype, stype, align, typename = dtype[:4]
+        if dtype is None:
+            if value is not None:
+                raise TypeError("attempt to write value other than None to "
+                                "variable declared as NoneType")
+            value = array(0, stype)
+        if shape and not all(shape):
+            # Act out assignment to catch broadcasting errors.
+            a = zeros(shape, dtype)
+            a[args] = value  # If this doesn't throw an error, good to go.
+            shape = ()
+            value = array(0, dtype)  # dtype or stype okay here
         arg0 = args[0] if args else slice(None)
         args = args[1:]
         root = self.root()
@@ -422,7 +447,7 @@ class PDBLeaf(object):
             newfile = False
         args, shape, offset = leading_args(args, shape)
         if offset:
-            addr += dtype.itemsize * offset
+            addr += stype.itemsize * offset
         seeker = handle.seek
         f = seeker(addr)
         if args:

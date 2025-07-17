@@ -268,10 +268,16 @@ def _dump_attributes(group, attributes, prefix):
         name = prefix + name
         if item.isgroup() or item.islist() == 2:
             subgroups.append((item, name))
-        elif item.attrs:
-            for aname, value in itemsof(item.attrs):
-                aname = name + ":" + aname
-                attributes._write_attr(aname, value)
+        else:
+            if item.islist():
+                item = item.parent()
+            shape = item.tsa[1]  # "0" pseudo-attribute for zero length arrays
+            if shape and not all(shape):
+                attributes._write_attr(name + ":0", array(shape))
+            if item.attrs:
+                for aname, value in itemsof(item.attrs):
+                    aname = name + ":" + aname
+                    attributes._write_attr(aname, value)
     for item, name in subgroups:
         _dump_attributes(item, attributes, name + ":")
     return prefix, attributes
@@ -303,7 +309,7 @@ def _dump_group(f, prefix, islist, group, blockadds, blocks):
         typename = typename[3]  # dtype, stype, align, typename
         if islist:
             shape = (1,) + (shape or ())
-        if shape:
+        if shape and all(shape):
             size = prod(shape)
             # Set all index origins to 1 to match yorick.
             shape = b'\x01'.join(b'1\x01' + _byt(s)
