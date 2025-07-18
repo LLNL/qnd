@@ -118,7 +118,7 @@ def openpdb(filename, mode='r', auto=1, hooks=None, **kwargs):
             name = handle.filename(i)
             if not i:
                 raise IOError("Fatal errors opening PDB file "
-                              "".format(name))
+                              "{}".format(name))
             handle.open(i-1)
             warn("file family stopped by incompatible {}".format(name))
     if not n and order:
