@@ -904,14 +904,20 @@ def _reader(item, args):
                 # value = value.view(recarray)
                 pass
         elif kind in "SU":
-            if not PY2:
-                if dtyp.kind == "S":
-                    try:
-                        value = npdecode(value, "utf8")
-                    except UnicodeDecodeError:
-                        value = npdecode(value, "latin1")
+            value = _totext(value)
     if isinstance(value, ndarray) and not value.shape:
         value = value[()]
+    return value
+
+
+def _totext(value):
+    if not PY2 and value.dtype.kind == "S":
+        try:
+            value = npdecode(value, "utf8")
+        except UnicodeDecodeError:
+            value = npdecode(value, "latin1")
+    if not value.ndim:
+        value = value[()]  # make scalar text a real string instance
     return value
 
 
@@ -935,50 +941,50 @@ def _dump_object(item, value):
         if module is not None and module != _builtin_module:
             cname = ".".join((module, cname))
         item["__class__"] = cname
-        # Note that __getnewargs_ex__ is python3 only, so we skip
-        # it here.  The recommendation in the python3 docs is to use
-        # the _ex version only if __new__ requires keyword arguments.
-        # Similarly, we do not support the python2-only __getinitargs__.
+        # We do not support the python2-only __getinitargs__.
         mydict = getattr(value, "__dict__", None)
-        getnew = getattr(value, "__getnewargs__", None)
-        setter = hasattr(value, "__setstate__")
         getter = getattr(value, "__getstate__", None)
-        if getnew:
-            args = getnew()
-        elif not getter and mydict is None:
-            # We cannot handle the intricacies of the full
-            # pickle/copyreg protocol, but by handling one simple
-            # case of __reduce__ we can pick up both slice() and set()
-            # objects, which is worthwhile.
-            # Virtually all objects have a __reduce__ method, which
-            # will often raise a TypeError.  Go ahead and blow up here.
-            getnew = value.__reduce__()
-            if getnew[0] != cls or any(v is not None for v in getnew[2:]):
-                raise TypeError("QnD cannot dump class {}".format(cname))
-            args = getnew[1]
-        if getnew:
-            item["__getnewargs__"] = {}
-            subdir = item["__getnewargs__"]
-            for i, arg in enumerate(args):
-                subdir["_" + str(i)] = arg
-        value = getter() if getter else mydict
-        if setter:
-            # __setstate__ only called if __getstate__ not false
-            # Never convert lists or tuples to ndarrays here.  (??)
-            if value:
-                if isinstance(value, (list, tuple)):
-                    value = list, value
-                item["__setstate__"] = value
-        elif value:
-            item.update(value)
+        newargs, newkwargs = (), {}
+        if hasattr(value, "__getnewargs_ex__"):
+            newargs, newkwargs = value.__getnewargs_ex__()
+        elif hasattr(value, "__getnewargs__"):
+            newargs = value.__getnewargs__()
+        if newargs:
+            item["__getnewargs__"] = list, newargs
+        if newkwargs:
+            item["__getnewargs_ex__"] = newkwargs
+        state = getter() if getter else None
+        if state:
+            slots = None
+            if hasattr(value, "__slots__"):
+                if mydict is not None:
+                    mydict, slots = state
+                else:
+                    slots = state
+            elif mydict is not None:
+                mydict = state
+            if slots is not None:
+                item["__slots__"] = slots
+        else:
+            # No high level pickle interface, check for simple low level:
+            reduced = value.__reduce__()
+            if reduced[0] == cls and not any(v is not None
+                                             for v in reduced[2:]):
+                item["__reduce__"] = list, reduced[1]
+                mydict = None
+        if mydict is not None:
+            setter = hasattr(value, "__setstate__")
+            item["__setstate__" if setter else "__dict__"] = mydict
 
 
 def _load_object(qgroup, cls):
     # If you fail here, you can still read the group with ADict(qgroup)
     # which avoids this special treatment.
     cls = cls.read()  # assume QLeaf yields a text string
-    if not isinstance(cls, basestring):
+    dtyp = getattr(cls, "dtype", None)
+    if dtyp is None or not dtyp.kind in "SU" or cls.ndim:
         raise TypeError("Expecting __class__ member of QGroup to be text.")
+    cls = _totext(cls)
     qgroup = QGroup(qgroup, auto=2)
     if cls == "dict":
         obj = {}
@@ -994,30 +1000,31 @@ def _load_object(qgroup, cls):
                 obj[key] = value
             else:
                 key = value
+        return obj
+    elif cls == "ellipsis":
+        return Ellipsis
+    cls = cls.rsplit(".", 1)
+    try:
+        module = (import_module(cls[0]) if len(cls) > 1 else
+                  sys.modules[_builtin_module])
+        cls = getattr(module, cls[-1])
+    except (ImportError, AttributeError):
+        # If the named class does not exist or does not have
+        # the specified class, just return an ADict.
+        return ADict(qgroup)
+    reduced = qgroup.get("__reduce__")
+    if reduced is not None:
+        return cls(*reduced)
+    newargs = qgroup.get("__getnewargs__", ())
+    newkwargs = qgroup.get("__getnewargs_ex__", {})
+    obj = cls.__new__(cls, *newargs, **newkwargs)
+    if "__setstate__" in qgroup:
+        obj.__setstate__(qgroup["__setstate__"])
     else:
-        cls = cls.rsplit(".", 1)
-        try:
-            module = (import_module(cls[0]) if len(cls) > 1 else
-                      sys.modules[_builtin_module])
-            cls = getattr(module, cls[-1])
-        except (ImportError, AttributeError):
-            # If the named module does not exist or does not have
-            # the specified class, just return an ADict.
-            return ADict(qgroup)
-        args = qgroup.get("__getnewargs__")
-        if args is not None:
-            args = [args["_" + str(i)] for i in range(len(args))]
-            obj = cls(*args)
-        else:
-            obj = object.__new__(cls)
-        args = qgroup.get("__setstate__")
-        if args is not None:
-            obj.__setstate__(args)
-        else:
-            names = list(name for name in qgroup
-                         if name not in ["__class__", "__getnewargs__"])
-            if names:
-                obj.__dict__.update(qgroup(2, names))
+        if "__dict__" in qgroup:
+            obj.__dict__.update(qgroup["__dict__"])
+        if "__slots__" in qgroup:
+            obj.__slots__.update(qgroup["__slots__"])
     return obj
 
 
