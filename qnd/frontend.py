@@ -917,7 +917,7 @@ def _totext(value):
         except UnicodeDecodeError:
             value = npdecode(value, "latin1")
     if not value.ndim:
-        value = value[()]  # make scalar text a real string instance
+        value = value.tolist()  # make scalar text a real string instance
     return value
 
 
